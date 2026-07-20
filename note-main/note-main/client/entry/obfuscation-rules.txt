@@ -1,0 +1,2 @@
+# Define project specific obfuscation rules here.
+-enable-property-obfuscation

@@ -1,0 +1,39 @@
+﻿# 虚拟环境
+.venv/
+venv/
+env/
+# 压缩包
+*.zip
+*.rar
+*.7z
+*.tar.gz
+# 二进制文件
+*.pyd
+*.dll
+*.so
+# 缓存
+__pycache__/
+*.pyc
+*.log
+
+# 环境变量
+.env
+*.env
+!.env.example
+
+# 本地数据库和运行数据
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/
+
+# HarmonyOS / DevEco Studio 生成物
+.hvigor/
+oh_modules/
+build/
+entry/build/
+.idea/
+*.hap
+*.hsp

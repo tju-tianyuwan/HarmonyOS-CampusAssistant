@@ -1,0 +1,15 @@
+{
+  "string": [
+    { "name": "app_name", "value": "智慧伴学" },
+    { "name": "module_desc", "value": "智慧伴学主模块" },
+    { "name": "ability_desc", "value": "智慧伴学入口" },
+    { "name": "page_home", "value": "首页" },
+    { "name": "page_record", "value": "课堂录音" },
+    { "name": "page_session_detail", "value": "课时详情" },
+    { "name": "page_ai_note", "value": "AI 问答" },
+    { "name": "page_notes", "value": "我的笔记" },
+    { "name": "page_review", "value": "教师审核" },
+    { "name": "mic_reason", "value": "课堂录音转写需要使用麦克风" },
+    { "name": "datasync_reason", "value": "跨设备接续学习进度需要多设备协同权限" }
+  ]
+}

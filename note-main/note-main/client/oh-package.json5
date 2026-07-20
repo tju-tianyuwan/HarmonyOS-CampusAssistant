@@ -1,0 +1,13 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "smartstudy",
+  "version": "1.0.0",
+  "description": "智慧伴学 HarmonyOS NEXT Demo 客户端",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.19"
+  }
+}
