@@ -9,6 +9,15 @@ import { GlobalState } from '../service/GlobalState';
 type RecordState = 'idle' | 'recording' | 'paused' | 'finished';
 
 const CHUNK_INTERVAL_MS: number = 4000;
+const RECORD_BG: string = '#F2F7F6';
+const RECORD_PANEL: string = '#FFFFFF';
+const RECORD_SOFT: string = '#F5FFFB';
+const RECORD_CYAN: string = '#12BFE8';
+const RECORD_BLUE: string = '#3F7DFF';
+const RECORD_VIOLET: string = '#7A63F3';
+const RECORD_AMBER: string = '#FFB84D';
+const RECORD_GLASS: string = 'rgba(255,255,255,0.90)';
+const RECORD_BORDER: string = 'rgba(255,255,255,0.92)';
 
 /**
  * 课堂录音（Notein 风）：左侧居中大计时 + 圆形录制按钮，右侧转写浮岛。
@@ -30,12 +39,14 @@ export struct RecordPage {
   @State publishingOutline: boolean = false;
   @State simulated: boolean = false;
   @State uploadFailures: number = 0;
+  @State waveFrame: number = 0;
   private sessionId: number = -1;
   private seq: number = 0;
   private capturer: audio.AudioCapturer | null = null;
   private pendingBuffers: ArrayBuffer[] = [];
   private chunkTimer: number = -1;
   private clockTimer: number = -1;
+  private waveTimer: number = -1;
   private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
@@ -149,6 +160,7 @@ export struct RecordPage {
     this.chunkTimer = setInterval(() => {
       this.flushChunk();
     }, CHUNK_INTERVAL_MS);
+    this.startWaveMotion();
   }
 
   private stopTimers(): void {
@@ -160,6 +172,24 @@ export struct RecordPage {
       clearInterval(this.chunkTimer);
       this.chunkTimer = -1;
     }
+    this.stopWaveMotion();
+  }
+
+  private startWaveMotion(): void {
+    if (this.waveTimer >= 0) {
+      return;
+    }
+    this.waveTimer = setInterval(() => {
+      this.waveFrame = (this.waveFrame + 1) % 12;
+    }, 160);
+  }
+
+  private stopWaveMotion(): void {
+    if (this.waveTimer >= 0) {
+      clearInterval(this.waveTimer);
+      this.waveTimer = -1;
+    }
+    this.waveFrame = 0;
   }
 
   private releaseCapturer(): void {
@@ -334,13 +364,189 @@ export struct RecordPage {
 
   // ---------- UI ----------
   @Builder
-  waveBar(h: number) {
+  recordAtmosphere() {
+    Stack() {
+      Column()
+        .width('100%')
+        .height('100%')
+        .linearGradient({
+          angle: 34,
+          colors: [
+            ['#F8FCFA', 0],
+            [RECORD_BG, 0.54],
+            ['#EEF3FF', 1]
+          ]
+        })
+      Column()
+        .width(560)
+        .height(560)
+        .borderRadius(72)
+        .rotate({ angle: -18 })
+        .backgroundColor('rgba(5,206,145,0.11)')
+        .position({ x: -190, y: -120 })
+      Column()
+        .width(620)
+        .height(360)
+        .borderRadius(60)
+        .rotate({ angle: 12 })
+        .backgroundColor('rgba(63,125,255,0.08)')
+        .position({ x: 980, y: 310 })
+      Column()
+        .width('100%')
+        .height(1)
+        .backgroundColor('rgba(255,255,255,0.72)')
+        .position({ x: 0, y: 238 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  statusPill() {
+    Row({ space: 8 }) {
+      Column()
+        .width(8)
+        .height(8)
+        .borderRadius(4)
+        .backgroundColor(this.recordState === 'recording' ? AppTheme.PRIMARY :
+          (this.recordState === 'paused' ? RECORD_AMBER : RECORD_BLUE))
+      Text(this.recordState === 'idle' ? '待开始' :
+        (this.recordState === 'paused' ? '暂停中' :
+          (this.recordState === 'finished' ? '已完成' : '录音中')))
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.TEXT_SECONDARY)
+    }
+    .height(34)
+    .padding({ left: 13, right: 13 })
+    .borderRadius(999)
+    .backgroundColor('rgba(18,24,24,0.06)')
+    .border({ width: 1, color: 'rgba(18,24,24,0.08)' })
+  }
+
+  @Builder
+  waveBar(base: number, index: number) {
     Column()
-      .width(4)
-      .height(this.recordState === 'recording' ? h : 8)
-      .borderRadius(2)
-      .backgroundColor(this.recordState === 'recording' ? AppTheme.PRIMARY : AppTheme.DIVIDER)
-      .margin({ left: 3, right: 3 })
+      .width(this.recordState === 'recording' ? 6 : 5)
+      .height(this.waveHeight(base, index))
+      .borderRadius(999)
+      .linearGradient({
+        angle: 180,
+        colors: [
+          [this.waveColor(index), 0],
+          ['rgba(255,255,255,0.86)', 1]
+        ]
+      })
+      .opacity(this.waveOpacity(index))
+      .margin({ left: 4, right: 4 })
+      .shadow({
+        radius: this.recordState === 'recording' ? 12 : 0,
+        color: this.waveColor(index),
+        offsetX: 0,
+        offsetY: 4
+      })
+      .animation({ duration: 150, curve: Curve.EaseOut })
+  }
+
+  private waveHeight(base: number, index: number): number {
+    if (this.recordState === 'paused') {
+      return 14;
+    }
+    if (this.recordState !== 'recording') {
+      return 9;
+    }
+    const phase: number = (this.waveFrame + index) % 8;
+    let boost: number = 2;
+    if (phase === 0) {
+      boost = 20;
+    } else if (phase === 1) {
+      boost = 12;
+    } else if (phase === 2) {
+      boost = 4;
+    } else if (phase === 3) {
+      boost = -8;
+    } else if (phase === 4) {
+      boost = 16;
+    } else if (phase === 5) {
+      boost = 7;
+    } else if (phase === 6) {
+      boost = -4;
+    }
+    const value: number = base + boost;
+    if (value < 12) {
+      return 12;
+    }
+    if (value > 68) {
+      return 68;
+    }
+    return value;
+  }
+
+  private waveOpacity(index: number): number {
+    if (this.recordState !== 'recording') {
+      return 0.34;
+    }
+    const phase: number = (this.waveFrame + index) % 6;
+    return phase === 0 || phase === 1 ? 1 : (phase === 2 || phase === 5 ? 0.78 : 0.58);
+  }
+
+  private waveColor(index: number): string {
+    if (this.recordState !== 'recording') {
+      return 'rgba(18,24,24,0.22)';
+    }
+    const phase: number = (this.waveFrame + index) % 4;
+    if (phase === 0) {
+      return AppTheme.PRIMARY;
+    }
+    if (phase === 1) {
+      return RECORD_CYAN;
+    }
+    if (phase === 2) {
+      return RECORD_BLUE;
+    }
+    return RECORD_VIOLET;
+  }
+
+  @Builder
+  waveform() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width(340)
+        .height(94)
+        .borderRadius(47)
+        .backgroundColor(this.recordState === 'recording' ? 'rgba(5,206,145,0.08)' : 'rgba(18,24,24,0.04)')
+        .border({
+          width: 1.2,
+          color: this.recordState === 'recording' ? 'rgba(5,206,145,0.18)' : 'rgba(18,24,24,0.06)'
+        })
+      Column()
+        .width(this.recordState === 'recording' ? 286 : 210)
+        .height(2)
+        .borderRadius(1)
+        .backgroundColor(this.recordState === 'recording' ? 'rgba(18,191,232,0.28)' : 'rgba(18,24,24,0.10)')
+        .animation({ duration: 180, curve: Curve.EaseOut })
+      Row() {
+        this.waveBar(18, 0)
+        this.waveBar(34, 1)
+        this.waveBar(48, 2)
+        this.waveBar(28, 3)
+        this.waveBar(58, 4)
+        this.waveBar(40, 5)
+        this.waveBar(22, 6)
+        this.waveBar(52, 7)
+        this.waveBar(64, 8)
+        this.waveBar(42, 9)
+        this.waveBar(26, 10)
+        this.waveBar(56, 11)
+        this.waveBar(36, 12)
+        this.waveBar(50, 13)
+        this.waveBar(30, 14)
+        this.waveBar(44, 15)
+      }
+      .height(82)
+      .alignItems(VerticalAlign.Center)
+    }
+    .width(360)
+    .height(104)
   }
 
   /** 圆形操作钮（Notein 悬浮圆钮风格） */
@@ -415,14 +621,14 @@ export struct RecordPage {
       .width('100%')
 
       TextArea({ text: this.outlineText, placeholder: '录音结束后点击「生成提纲」，校准后保存。' })
-        .layoutWeight(1)
-        .width('100%')
-        .fontSize(AppTheme.FONT_BODY)
-        .backgroundColor(AppTheme.BG_CARD)
-        .borderRadius(AppTheme.RADIUS_CARD)
-        .enabled(this.outlineData !== null && this.outlineData.status !== 'published')
-        .onChange((v: string) => {
-          this.outlineText = v;
+      .layoutWeight(1)
+      .width('100%')
+      .fontSize(AppTheme.FONT_BODY)
+      .backgroundColor('rgba(255,255,255,0.76)')
+      .borderRadius(22)
+      .enabled(this.outlineData !== null && this.outlineData.status !== 'published')
+      .onChange((v: string) => {
+        this.outlineText = v;
           this.outlineDirty = true;
         })
 
@@ -461,32 +667,88 @@ export struct RecordPage {
     }
     .layoutWeight(1)
     .width('100%')
+    .padding(AppTheme.SPACE_L)
+    .borderRadius(26)
+    .backgroundColor('rgba(255,255,255,0.68)')
+    .border({ width: 1.2, color: RECORD_BORDER })
   }
 
   build() {
-    Column({ space: AppTheme.SPACE_L }) {
-      Row() {
-        this.backButton()
-        Blank()
-        Text('课堂录音')
-          .fontSize(AppTheme.FONT_CAPTION)
-          .fontColor(AppTheme.TEXT_TERTIARY)
-          .padding({ left: 12, right: 12, top: 5, bottom: 5 })
-          .borderRadius(999)
-          .backgroundColor(AppTheme.BG_CARD)
-      }
-      .width('100%')
-      .height(44)
+    Stack() {
+      this.recordAtmosphere()
 
-      Row({ space: AppTheme.SPACE_XL }) {
-        // 左：录音控制台
-        Column({ space: AppTheme.SPACE_XL }) {
-        Blank().layoutWeight(1)
+      Column({ space: AppTheme.SPACE_L }) {
+        Row() {
+          this.backButton()
+          Blank()
+          Row({ space: 8 }) {
+            Text('REC STUDIO')
+              .fontSize(11)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#121818')
+              .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+              .borderRadius(999)
+              .backgroundColor(RECORD_AMBER)
+            Text('课堂录音')
+              .fontSize(11)
+              .fontColor(AppTheme.TEXT_SECONDARY)
+              .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+              .borderRadius(999)
+              .backgroundColor(RECORD_GLASS)
+          }
+        }
+        .width('100%')
+        .height(44)
+
+        Row({ space: AppTheme.SPACE_XL }) {
+          // 左：录音控制台
+          Stack({ alignContent: Alignment.TopStart }) {
+            Column()
+              .width('100%')
+              .height('100%')
+              .borderRadius(34)
+              .linearGradient({
+                angle: 128,
+                colors: [
+                  [RECORD_PANEL, 0],
+                  [RECORD_SOFT, 0.58],
+                  ['#EEF3FF', 1]
+                ]
+              })
+            Column()
+              .width(260)
+              .height(210)
+              .borderRadius(48)
+              .rotate({ angle: -14 })
+              .backgroundColor('rgba(5,206,145,0.14)')
+              .position({ x: -82, y: -40 })
+            Column()
+              .width(210)
+              .height(180)
+              .borderRadius(44)
+              .rotate({ angle: 12 })
+              .backgroundColor('rgba(63,125,255,0.14)')
+              .position({ x: 210, y: 390 })
+            Row() {
+              Text('录音仪表盘')
+                .fontSize(AppTheme.FONT_BODY)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(AppTheme.INK)
+              Blank()
+              this.statusPill()
+            }
+            .width('100%')
+            .padding({ left: 24, right: 24, top: 22 })
+
+            Column({ space: AppTheme.SPACE_XL }) {
+              Blank().layoutWeight(1)
 
         TextInput({ text: this.title, placeholder: '本次课时标题' })
           .fontSize(AppTheme.FONT_SUBTITLE)
           .textAlign(TextAlign.Center)
           .backgroundColor('transparent')
+          .fontColor(AppTheme.INK)
+          .placeholderColor(AppTheme.TEXT_TERTIARY)
           .enabled(this.recordState === 'idle')
           .onChange((v: string) => {
             this.title = v;
@@ -497,20 +759,7 @@ export struct RecordPage {
           .fontWeight(FontWeight.Bold)
           .fontColor(this.recordState === 'recording' ? AppTheme.INK : AppTheme.TEXT_TERTIARY)
 
-        Row() {
-          this.waveBar(14)
-          this.waveBar(28)
-          this.waveBar(40)
-          this.waveBar(24)
-          this.waveBar(46)
-          this.waveBar(32)
-          this.waveBar(18)
-          this.waveBar(36)
-          this.waveBar(26)
-          this.waveBar(14)
-        }
-        .height(56)
-        .alignItems(VerticalAlign.Center)
+        this.waveform()
 
         // 主控按钮
         Row({ space: AppTheme.SPACE_XL }) {
@@ -537,7 +786,7 @@ export struct RecordPage {
           (this.recordState === 'paused' ? '已暂停' :
             (this.recordState === 'finished' ? '录音已结束，可生成提纲或继续录音' : '录音中')))
           .fontSize(AppTheme.FONT_CAPTION)
-          .fontColor(AppTheme.TEXT_TERTIARY)
+          .fontColor(AppTheme.TEXT_SECONDARY)
 
         if (this.simulated && this.recordState !== 'idle') {
           Text('模拟模式：无真实音频，定时上传占位分片')
@@ -552,23 +801,60 @@ export struct RecordPage {
             .fontSize(AppTheme.FONT_CAPTION)
             .fontColor(AppTheme.DANGER)
         }
-        Blank().layoutWeight(1)
-      }
-      .width(360)
-      .height('100%')
+              Blank().layoutWeight(1)
+            }
+            .width('100%')
+            .height('100%')
+            .padding({ left: 22, right: 22, top: 76, bottom: 22 })
+            .alignItems(HorizontalAlign.Center)
+          }
+          .width(420)
+          .height('100%')
+          .clip(true)
+          .borderRadius(34)
+          .border({ width: 1.2, color: RECORD_BORDER })
+          .shadow({ radius: 30, color: 'rgba(31,62,68,0.12)', offsetX: 0, offsetY: 14 })
 
       // 右：实时转写浮岛
       Column({ space: AppTheme.SPACE_M }) {
-        Text('实时转写')
-          .fontSize(AppTheme.FONT_SUBTITLE)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(AppTheme.INK)
-          .width('100%')
+        Row() {
+          Column({ space: 4 }) {
+            Text('实时转写')
+              .fontSize(AppTheme.FONT_SUBTITLE)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(AppTheme.INK)
+            Text(`${this.segments.length} 条分片 · ${this.uploadFailures} 个上传失败`)
+              .fontSize(AppTheme.FONT_CAPTION)
+              .fontColor(AppTheme.TEXT_TERTIARY)
+          }
+          .alignItems(HorizontalAlign.Start)
+          Blank()
+          Text(this.simulated ? '模拟模式' : '云端 ASR')
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontColor(this.simulated ? AppTheme.WARNING : AppTheme.PRIMARY)
+            .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+            .borderRadius(999)
+            .backgroundColor(AppTheme.tagBg(this.simulated ? AppTheme.WARNING : AppTheme.PRIMARY))
+        }
+        .width('100%')
 
         Column() {
           if (this.segments.length === 0) {
             Column({ space: AppTheme.SPACE_M }) {
-              Text('💬').fontSize(40)
+              Stack({ alignContent: Alignment.Center }) {
+                Column()
+                  .width(96)
+                  .height(96)
+                  .borderRadius(32)
+                  .rotate({ angle: -10 })
+                  .backgroundColor(AppTheme.tagBg(RECORD_CYAN))
+                Text('听')
+                  .fontSize(38)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(RECORD_CYAN)
+              }
+              .width(120)
+              .height(112)
               Text(this.recordState === 'idle' ?
                 '开始录音后，云端转写文字将在此实时显示' : '等待首个分片转写…')
                 .fontSize(AppTheme.FONT_BODY)
@@ -604,9 +890,10 @@ export struct RecordPage {
         .layoutWeight(1)
         .width('100%')
         .padding(AppTheme.SPACE_L)
-        .borderRadius(AppTheme.RADIUS_CARD)
-        .backgroundColor(AppTheme.BG_CARD)
-        .shadow({ radius: 16, color: 'rgba(17,17,17,0.04)', offsetX: 0, offsetY: 4 })
+        .borderRadius(26)
+        .backgroundColor('rgba(255,255,255,0.72)')
+        .border({ width: 1.2, color: RECORD_BORDER })
+        .shadow({ radius: 24, color: 'rgba(31,62,68,0.10)', offsetX: 0, offsetY: 10 })
 
         if (this.recordState === 'finished') {
           this.outlinePanel()
@@ -614,15 +901,22 @@ export struct RecordPage {
       }
         .layoutWeight(1)
         .height('100%')
+        .padding(AppTheme.SPACE_L)
+        .borderRadius(34)
+        .backgroundColor(RECORD_GLASS)
+        .border({ width: 1.2, color: RECORD_BORDER })
+        .shadow({ radius: 30, color: 'rgba(31,62,68,0.12)', offsetX: 0, offsetY: 14 })
       }
       .layoutWeight(1)
       .width('100%')
       .alignItems(VerticalAlign.Top)
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ left: AppTheme.SPACE_XXL, right: AppTheme.SPACE_XXL, top: 28, bottom: AppTheme.SPACE_XXL })
     }
     .width('100%')
     .height('100%')
-    .padding(AppTheme.SPACE_XXL)
-    .backgroundColor(AppTheme.BG_PAGE)
-    .alignItems(HorizontalAlign.Start)
+    .backgroundColor(RECORD_BG)
   }
 }

@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from ..db import get_db, engine
-from ..models import ChatMessage, ChatSession
+from ..models import ChatMessage, ChatSession, ClassCourse, User
+from ..services.analytics import record_question
 from ..services import rag
 from ..services.llm import chat_stream
 
@@ -69,6 +70,21 @@ async def ask(body: AskBody, db: Session = Depends(get_db)):
     db.commit()
 
     hits = rag.query(class_course_id, body.question)
+    asker = db.get(User, cs.user_id)
+    if asker and asker.role == "student":
+        course = db.get(ClassCourse, class_course_id)
+        try:
+            await record_question(
+                db,
+                class_course_id,
+                cs.user_id,
+                cs.id,
+                body.question,
+                len(hits),
+                course.name if course else "",
+            )
+        except Exception:
+            db.rollback()
     sources = [h["source"] for h in hits]
 
     async def gen():

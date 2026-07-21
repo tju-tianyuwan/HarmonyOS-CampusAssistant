@@ -103,3 +103,21 @@ export interface UiChatMessage {
   sources: string[];
   streaming: boolean;
 }
+
+export interface KeywordInsight {
+  keyword: string;
+  count: number;
+  examples: string[];
+  missed_count: number;
+  heat: number;
+  level: string;
+}
+
+export interface ClassroomAnalytics {
+  class_course_id: number;
+  updated_at: string;
+  total_questions: number;
+  missed_count: number;
+  top_keywords: KeywordInsight[];
+  hot_zones: KeywordInsight[];
+}

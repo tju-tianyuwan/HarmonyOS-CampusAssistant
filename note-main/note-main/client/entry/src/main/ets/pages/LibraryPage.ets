@@ -88,21 +88,59 @@ export struct LibraryPage {
   @State enteringCourseActive: boolean = false;
   @State fabPulse: boolean = false;
   @State fabPressed: boolean = false;
+  @State greeting: string = '早上好';
   private fabTimer: number = -1;
   private formTimer: number = -1;
   private courseEnterTimer: number = -1;
+  private greetingTimer: number = -1;
 
   aboutToAppear(): void {
     this.enteringCourseId = -1;
     this.enteringCourseActive = false;
+    this.updateGreeting();
     this.loadCourses();
     this.startFabPulse();
+    this.startGreetingClock();
   }
 
   aboutToDisappear(): void {
     this.stopFabPulse();
     this.stopFormAnimation();
     this.stopCourseEnterAnimation();
+    this.stopGreetingClock();
+  }
+
+  private startGreetingClock(): void {
+    if (this.greetingTimer >= 0) {
+      return;
+    }
+    this.greetingTimer = setInterval(() => {
+      this.updateGreeting();
+    }, 60000);
+  }
+
+  private stopGreetingClock(): void {
+    if (this.greetingTimer >= 0) {
+      clearInterval(this.greetingTimer);
+      this.greetingTimer = -1;
+    }
+  }
+
+  private updateGreeting(): void {
+    const hour: number = new Date().getHours();
+    if (hour >= 5 && hour < 10) {
+      this.greeting = '早上好';
+    } else if (hour >= 10 && hour < 12) {
+      this.greeting = '上午好';
+    } else if (hour >= 12 && hour < 14) {
+      this.greeting = '中午好';
+    } else if (hour >= 14 && hour < 18) {
+      this.greeting = '下午好';
+    } else if (hour >= 18) {
+      this.greeting = '晚上好';
+    } else {
+      this.greeting = '夜深了';
+    }
   }
 
   private startFabPulse(): void {
@@ -347,7 +385,7 @@ export struct LibraryPage {
   topArea() {
     Row({ space: AppTheme.SPACE_L }) {
       Column({ space: AppTheme.SPACE_XS }) {
-        Text(`早上好，${this.userName()}的学习主页`)
+        Text(`${this.greeting}，${this.userName()}`)
           .fontSize(32)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')

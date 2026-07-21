@@ -49,6 +49,15 @@ async def chat_stream(system: str, user: str) -> AsyncIterator[str]:
 
 
 def _mock_reply(system: str, user: str) -> str:
+    if "关键词" in system:
+        try:
+            payload = json.loads(user)
+            candidates = payload.get("candidates", []) if isinstance(payload, dict) else []
+            if isinstance(candidates, list) and candidates:
+                return json.dumps({"keywords": candidates[:4]}, ensure_ascii=False)
+        except json.JSONDecodeError:
+            pass
+        return json.dumps({"keywords": []}, ensure_ascii=False)
     if "提纲" in system or "outline" in system.lower():
         return (
             "# 二叉树\n\n## 一、基本概念\n- 每个节点最多两个子节点（左子树 / 右子树）\n\n"

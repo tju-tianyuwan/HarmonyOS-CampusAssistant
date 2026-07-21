@@ -4,6 +4,16 @@ import { CourseSession, Outline, TranscriptSegment } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
 
+const CLASS_BG: string = '#F2F7F6';
+const CLASS_PANEL: string = '#FFFFFF';
+const CLASS_SOFT: string = '#F5FFFB';
+const CLASS_CYAN: string = '#12BFE8';
+const CLASS_BLUE: string = '#3F7DFF';
+const CLASS_AMBER: string = '#FFB84D';
+const CLASS_VIOLET: string = '#7A63F3';
+const CLASS_GLASS: string = 'rgba(255,255,255,0.90)';
+const CLASS_BORDER: string = 'rgba(255,255,255,0.92)';
+
 /**
  * 课堂：卡片列表 | 课堂详情（转写文本 + AI 提纲）。
  */
@@ -18,9 +28,35 @@ export struct ClassPage {
   @State outlineDirty: boolean = false;
   @State savingOutline: boolean = false;
   @State publishingOutline: boolean = false;
+  @State pageReady: boolean = false;
+  @State pulse: boolean = false;
+  @State pressedIndex: number = -1;
+  private introTimer: number = -1;
+  private pulseTimer: number = -1;
 
   aboutToAppear(): void {
     this.loadSessions();
+    this.pageReady = false;
+    this.introTimer = setTimeout(() => {
+      this.pageReady = true;
+      this.introTimer = -1;
+    }, 24);
+    if (this.pulseTimer < 0) {
+      this.pulseTimer = setInterval(() => {
+        this.pulse = !this.pulse;
+      }, 1500);
+    }
+  }
+
+  aboutToDisappear(): void {
+    if (this.introTimer >= 0) {
+      clearTimeout(this.introTimer);
+      this.introTimer = -1;
+    }
+    if (this.pulseTimer >= 0) {
+      clearInterval(this.pulseTimer);
+      this.pulseTimer = -1;
+    }
   }
 
   private toast(msg: string): void {
@@ -258,8 +294,185 @@ export struct ClassPage {
   }
 
   @Builder
+  pageAtmosphere() {
+    Stack() {
+      Column()
+        .width('100%')
+        .height('100%')
+        .linearGradient({
+          angle: 34,
+          colors: [
+            ['#F8FCFA', 0],
+            [CLASS_BG, 0.54],
+            ['#EEF3FF', 1]
+          ]
+        })
+      Column()
+        .width(560)
+        .height(560)
+        .borderRadius(72)
+        .rotate({ angle: -18 })
+        .backgroundColor('rgba(5,206,145,0.11)')
+        .position({ x: -190, y: -120 })
+        .translate({ x: this.pulse ? 10 : 0, y: this.pulse ? 0 : 8 })
+        .animation({ duration: 1200, curve: Curve.EaseOut })
+      Column()
+        .width(660)
+        .height(360)
+        .borderRadius(58)
+        .rotate({ angle: 12 })
+        .backgroundColor('rgba(63,125,255,0.08)')
+        .position({ x: 980, y: 300 })
+      Column()
+        .width('100%')
+        .height(1)
+        .backgroundColor('rgba(255,255,255,0.72)')
+        .position({ x: 0, y: 236 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  classHero() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .borderRadius(32)
+        .linearGradient({
+          angle: 118,
+          colors: [
+            [CLASS_PANEL, 0],
+            [CLASS_SOFT, 0.58],
+            ['#EEF3FF', 1]
+          ]
+        })
+      Column()
+        .width(520)
+        .height(210)
+        .borderRadius(46)
+        .rotate({ angle: -10 })
+        .linearGradient({
+          angle: 80,
+          colors: [
+            ['rgba(255,184,77,0.20)', 0],
+            ['rgba(5,206,145,0.12)', 0.60],
+            ['rgba(255,255,255,0.02)', 1]
+          ]
+        })
+        .position({ x: -80, y: -58 })
+      Column()
+        .width(380)
+        .height(220)
+        .borderRadius(44)
+        .rotate({ angle: 11 })
+        .backgroundColor('rgba(63,125,255,0.13)')
+        .position({ x: 900, y: -46 })
+        .translate({ x: this.pulse ? -10 : 0, y: this.pulse ? 7 : 0 })
+        .animation({ duration: 1200, curve: Curve.EaseOut })
+      Row() {
+        Column({ space: AppTheme.SPACE_M }) {
+          Row({ space: 8 }) {
+            Text('CLASS TRACE')
+              .fontSize(11)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#121818')
+              .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+              .borderRadius(999)
+              .backgroundColor(CLASS_AMBER)
+            Text(`${this.sessions.length} 条课堂记录`)
+              .fontSize(11)
+              .fontColor('rgba(18,24,24,0.58)')
+              .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+              .borderRadius(999)
+              .backgroundColor('rgba(18,24,24,0.06)')
+          }
+          Text('课堂')
+            .fontSize(48)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(AppTheme.INK)
+          Text('从录音、转写到 AI 提纲，沿着课时轨迹回看每一次课堂发生的知识。')
+            .fontSize(AppTheme.FONT_BODY)
+            .fontColor('rgba(18,24,24,0.56)')
+            .maxLines(1)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        Stack({ alignContent: Alignment.Center }) {
+          Column()
+            .width(160)
+            .height(160)
+            .borderRadius(80)
+            .border({ width: 1.4, color: 'rgba(18,24,24,0.12)' })
+          Column()
+            .width(116)
+            .height(3)
+            .borderRadius(2)
+            .rotate({ angle: 24 })
+            .backgroundColor('rgba(18,191,232,0.38)')
+          Column()
+            .width(102)
+            .height(3)
+            .borderRadius(2)
+            .rotate({ angle: -28 })
+            .backgroundColor('rgba(5,206,145,0.36)')
+          this.heroNode('录', CLASS_CYAN, 22, 68, 54)
+          this.heroNode('转', CLASS_AMBER, 88, 98, 50)
+          this.heroNode('思', AppTheme.PRIMARY, 150, 58, 58)
+        }
+        .width(230)
+        .height(188)
+        .scale({ x: this.pulse ? 1.025 : 1, y: this.pulse ? 1.025 : 1 })
+        .animation({ duration: 1200, curve: Curve.EaseOut })
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ left: 34, right: 32 })
+      .alignItems(VerticalAlign.Center)
+    }
+    .width('100%')
+    .height(190)
+    .clip(true)
+    .borderRadius(32)
+    .border({ width: 1.2, color: CLASS_BORDER })
+    .shadow({ radius: 30, color: 'rgba(31,62,68,0.12)', offsetX: 0, offsetY: 14 })
+  }
+
+  @Builder
+  heroNode(label: string, color: string, x: number, y: number, size: number) {
+    Text(label)
+      .fontSize(16)
+      .fontWeight(FontWeight.Bold)
+      .fontColor('#FFFFFF')
+      .width(size)
+      .height(size)
+      .textAlign(TextAlign.Center)
+      .borderRadius(size / 2)
+      .backgroundColor(color)
+      .border({ width: 1.2, color: 'rgba(255,255,255,0.76)' })
+      .shadow({ radius: 18, color: color, offsetX: 0, offsetY: 8 })
+      .position({ x: x, y: y })
+  }
+
+  @Builder
   sessionCard(s: CourseSession, index: number) {
-    Column({ space: AppTheme.SPACE_M }) {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .borderRadius(24)
+        .backgroundColor(s.outline_kind === 'official' && s.outline_status === 'published' ?
+          'rgba(229,248,239,0.94)' : CLASS_GLASS)
+      Column()
+        .width(88)
+        .height(88)
+        .borderRadius(26)
+        .rotate({ angle: -12 })
+        .backgroundColor(AppTheme.tagBg(this.sessionTagColor(s)))
+        .position({ x: 206, y: 114 })
+      Column({ space: AppTheme.SPACE_M }) {
       Row() {
         Text(this.sessionTagLabel(s))
           .fontSize(AppTheme.FONT_CAPTION)
@@ -286,31 +499,55 @@ export struct ClassPage {
       Text(this.sessionCardDesc(s))
         .fontSize(AppTheme.FONT_CAPTION)
         .fontColor(AppTheme.TEXT_SECONDARY)
-        .maxLines(2)
+        .maxLines(3)
       Blank()
-      Text('打开课堂')
-        .fontSize(AppTheme.FONT_CAPTION)
-        .fontColor(this.sessionTagColor(s))
+        Row({ space: 7 }) {
+          Text('打开课堂')
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.sessionTagColor(s))
+          Text('→')
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sessionTagColor(s))
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .padding(AppTheme.SPACE_L)
+      .alignItems(HorizontalAlign.Start)
     }
-    .width(286)
-    .height(188)
-    .padding(AppTheme.SPACE_L)
-    .borderRadius(18)
-    .backgroundColor(s.outline_kind === 'official' && s.outline_status === 'published' ?
-      'rgba(229,248,239,0.96)' : AppTheme.BG_CARD)
+    .width('100%')
+    .height(210)
+    .clip(true)
+    .borderRadius(24)
     .border({
-      width: s.outline_kind === 'official' && s.outline_status === 'published' ? 1.5 : 0,
-      color: s.outline_kind === 'official' && s.outline_status === 'published' ? AppTheme.SUCCESS : 'transparent'
+      width: 1.2,
+      color: s.outline_kind === 'official' && s.outline_status === 'published' ? AppTheme.SUCCESS : CLASS_BORDER
     })
     .shadow({
-      radius: s.outline_kind === 'official' && s.outline_status === 'published' ? 24 : 18,
-      color: s.outline_kind === 'official' && s.outline_status === 'published' ?
-        'rgba(14,173,105,0.18)' : 'rgba(0,0,0,0.06)',
+      radius: this.pressedIndex === index ? 16 : (s.outline_kind === 'official' && s.outline_status === 'published' ? 26 : 22),
+      color: this.pressedIndex === index ? 'rgba(31,62,68,0.08)' :
+        (s.outline_kind === 'official' && s.outline_status === 'published' ?
+          'rgba(14,173,105,0.18)' : 'rgba(31,62,68,0.12)'),
       offsetX: 0,
-      offsetY: 6
+      offsetY: this.pressedIndex === index ? 6 : 10
     })
-    .alignItems(HorizontalAlign.Start)
+    .translate({ x: 0, y: this.pressedIndex === index ? 5 : 0 })
+    .scale({
+      x: this.pressedIndex === index ? 0.976 : 1,
+      y: this.pressedIndex === index ? 0.976 : 1
+    })
+    .animation({ duration: this.pressedIndex === index ? 90 : 240, curve: Curve.EaseOut })
+    .onTouch((event: TouchEvent) => {
+      if (event.type === TouchType.Down) {
+        this.pressedIndex = index;
+      } else if (event.type === TouchType.Up) {
+        this.pressedIndex = -1;
+      }
+    })
     .onClick(() => {
+      this.pressedIndex = -1;
       this.selectSession(index);
     })
   }
@@ -318,30 +555,31 @@ export struct ClassPage {
   @Builder
   listView() {
     Column({ space: AppTheme.SPACE_L }) {
-      Row() {
-        Text('课堂')
-          .fontSize(AppTheme.FONT_TITLE)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(AppTheme.INK)
-        Blank()
-        Text(`${this.sessions.length} 条课堂记录`)
-          .fontSize(AppTheme.FONT_CAPTION)
-          .fontColor(AppTheme.TEXT_SECONDARY)
-          .padding({ left: 12, right: 12, top: 5, bottom: 5 })
-          .borderRadius(999)
-          .backgroundColor(AppTheme.BG_CARD)
-      }
-      .width('100%')
-      .height(44)
+      this.classHero()
 
       if (this.sessions.length === 0) {
         Column({ space: AppTheme.SPACE_S }) {
+          Stack({ alignContent: Alignment.Center }) {
+            Column()
+              .width(96)
+              .height(96)
+              .borderRadius(32)
+              .rotate({ angle: -10 })
+              .backgroundColor(AppTheme.tagBg(CLASS_AMBER))
+            Text('录')
+              .fontSize(38)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(CLASS_AMBER)
+          }
+          .width(120)
+          .height(112)
           Text('暂无可见课堂记录')
-            .fontSize(AppTheme.FONT_SUBTITLE)
-            .fontColor(AppTheme.TEXT_SECONDARY)
+            .fontSize(22)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(AppTheme.INK)
           Text(GlobalState.isTeacher() ? '完成自己的录音后会显示在这里' : '完成自己的录音，或老师发布官方课时后会显示在这里')
-            .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.TEXT_TERTIARY)
+            .fontSize(AppTheme.FONT_BODY)
+            .fontColor(AppTheme.TEXT_SECONDARY)
         }
         .layoutWeight(1)
         .width('100%')
@@ -349,14 +587,16 @@ export struct ClassPage {
         .alignItems(HorizontalAlign.Center)
       } else {
         Scroll() {
-          Flex({ wrap: FlexWrap.Wrap }) {
+          Grid() {
             ForEach(this.sessions, (s: CourseSession, index: number) => {
-              Column() {
+              GridItem() {
                 this.sessionCard(s, index)
               }
-              .margin({ right: AppTheme.SPACE_L, bottom: AppTheme.SPACE_L })
             }, (s: CourseSession) => `${s.id}`)
           }
+          .columnsTemplate('1fr 1fr 1fr 1fr')
+          .columnsGap(AppTheme.SPACE_L)
+          .rowsGap(AppTheme.SPACE_L)
           .width('100%')
         }
         .layoutWeight(1)
@@ -365,6 +605,11 @@ export struct ClassPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ left: AppTheme.SPACE_XXL, right: AppTheme.SPACE_XXL, top: 28, bottom: AppTheme.SPACE_XXL })
+    .opacity(this.pageReady ? 1 : 0)
+    .translate({ x: 0, y: this.pageReady ? 0 : 24 })
+    .scale({ x: this.pageReady ? 1 : 0.986, y: this.pageReady ? 1 : 0.986 })
+    .animation({ duration: 360, curve: Curve.EaseOut })
   }
 
   @Builder
@@ -402,8 +647,10 @@ export struct ClassPage {
       .layoutWeight(1)
       .width('100%')
       .padding(AppTheme.SPACE_L)
-      .borderRadius(AppTheme.RADIUS_CARD)
-      .backgroundColor(AppTheme.BG_CARD)
+      .borderRadius(24)
+      .backgroundColor(CLASS_GLASS)
+      .border({ width: 1.2, color: CLASS_BORDER })
+      .shadow({ radius: 22, color: 'rgba(31,62,68,0.10)', offsetX: 0, offsetY: 10 })
       .scrollBar(BarState.Auto)
     }
     .layoutWeight(1)
@@ -437,8 +684,8 @@ export struct ClassPage {
           .layoutWeight(1)
           .width('100%')
           .fontSize(AppTheme.FONT_BODY)
-          .backgroundColor(AppTheme.BG_CARD)
-          .borderRadius(AppTheme.RADIUS_CARD)
+          .backgroundColor(CLASS_GLASS)
+          .borderRadius(24)
           .onChange((v: string) => {
             this.outlineText = v;
             this.outlineDirty = true;
@@ -447,7 +694,7 @@ export struct ClassPage {
           Button(this.savingOutline ? '保存中…' : '保存草稿')
             .layoutWeight(1)
             .enabled(!this.savingOutline)
-            .backgroundColor(AppTheme.BG_CARD)
+            .backgroundColor(CLASS_GLASS)
             .fontColor(AppTheme.TEXT_SECONDARY)
             .borderRadius(AppTheme.RADIUS_BTN)
             .onClick(() => {
@@ -477,8 +724,10 @@ export struct ClassPage {
         .layoutWeight(1)
         .width('100%')
         .padding(AppTheme.SPACE_L)
-        .borderRadius(AppTheme.RADIUS_CARD)
-        .backgroundColor(AppTheme.BG_CARD)
+        .borderRadius(24)
+        .backgroundColor(CLASS_GLASS)
+        .border({ width: 1.2, color: CLASS_BORDER })
+        .shadow({ radius: 22, color: 'rgba(31,62,68,0.10)', offsetX: 0, offsetY: 10 })
         .scrollBar(BarState.Auto)
       }
     }
@@ -497,7 +746,8 @@ export struct ClassPage {
           .height(36)
           .textAlign(TextAlign.Center)
           .borderRadius(18)
-          .backgroundColor(AppTheme.BG_CARD)
+          .backgroundColor(CLASS_GLASS)
+          .shadow({ radius: 14, color: 'rgba(31,62,68,0.08)', offsetX: 0, offsetY: 5 })
           .onClick(() => {
             this.detailOpen = false;
           })
@@ -522,10 +772,15 @@ export struct ClassPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ left: AppTheme.SPACE_XXL, right: AppTheme.SPACE_XXL, top: 28, bottom: AppTheme.SPACE_XXL })
+    .opacity(this.pageReady ? 1 : 0)
+    .translate({ x: 0, y: this.pageReady ? 0 : 18 })
+    .animation({ duration: 280, curve: Curve.EaseOut })
   }
 
   build() {
     Stack() {
+      this.pageAtmosphere()
       if (this.detailOpen) {
         this.detailView()
       } else {
@@ -534,7 +789,6 @@ export struct ClassPage {
     }
     .width('100%')
     .height('100%')
-    .padding(AppTheme.SPACE_XL)
-    .backgroundColor(AppTheme.BG_PAGE)
+    .backgroundColor(CLASS_BG)
   }
 }

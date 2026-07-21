@@ -83,3 +83,25 @@ class ChatMessage(SQLModel, table=True):
     content: str
     sources: str = ""  # JSON 数组：引用来源片段
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class QuestionLog(SQLModel, table=True):
+    """学生提问日志：用于教师端课堂疑问洞察，不参与 RAG 检索。"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    class_course_id: int = Field(index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    chat_session_id: int = Field(foreign_key="chatsession.id", index=True)
+    question: str
+    keywords: str = ""  # JSON 数组：本地规则 + LLM 归一化后的关键词
+    kb_hit_count: int = 0
+    kb_missed: bool = Field(default=False, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class KeywordStat(SQLModel, table=True):
+    """按课程聚合的关键词计数表。"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    class_course_id: int = Field(index=True)
+    keyword: str = Field(index=True)
+    count: int = 0
+    last_seen_at: datetime = Field(default_factory=datetime.utcnow)

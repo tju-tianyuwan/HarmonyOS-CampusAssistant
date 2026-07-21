@@ -7,14 +7,14 @@ from sqlmodel import Session, select
 from .config import settings
 from .db import engine, init_db
 from .models import ClassCourse, CourseSession, Membership, Note, TranscriptSegment, User
-from .routers import auth, chat, courses, notes, sessions
+from .routers import analytics, auth, chat, courses, notes, sessions
 
 app = FastAPI(title="智慧伴学 Demo API")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
-for r in (auth.router, courses.router, sessions.router, notes.router, chat.router):
+for r in (auth.router, courses.router, sessions.router, notes.router, chat.router, analytics.router):
     app.include_router(r, prefix="/api/v1")
 
 

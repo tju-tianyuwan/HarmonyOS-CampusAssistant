@@ -26,7 +26,7 @@ interface TabItem {
 const TABS: TabItem[] = [
   { key: 'overview', label: '概览', teacherOnly: false, studentOnly: false },
   { key: 'class', label: '课堂', teacherOnly: false, studentOnly: false },
-  { key: 'course_ai', label: 'AI', teacherOnly: false, studentOnly: true },
+  { key: 'course_ai', label: 'AI', teacherOnly: false, studentOnly: false },
   { key: 'notes', label: '笔记', teacherOnly: false, studentOnly: false },
   { key: 'review', label: '审核', teacherOnly: true, studentOnly: false }
 ];
@@ -230,9 +230,6 @@ struct Index {
   }
 
   private switchToAiPage(): void {
-    if (GlobalState.isTeacher()) {
-      return;
-    }
     this.currentTab = 'course_ai';
     GlobalState.updateSnapshot('course_ai');
   }
@@ -453,7 +450,9 @@ struct Index {
     .width('100%')
     .height(72)
     .padding({ left: AppTheme.SPACE_XL, right: AppTheme.SPACE_XL, top: AppTheme.SPACE_M })
-    .align(Alignment.TopStart)
+    .position({ x: 0, y: 0 })
+    .zIndex(30)
+    .hitTestBehavior(HitTestMode.Transparent)
   }
 
   @Builder
@@ -461,11 +460,11 @@ struct Index {
     Button(label)
       .fontSize(AppTheme.FONT_BODY)
       .fontWeight(this.currentTab === key ? FontWeight.Bold : FontWeight.Medium)
-      .fontColor(this.currentTab === key ? AppTheme.INK : 'rgba(255,255,255,0.72)')
+      .fontColor(this.currentTab === key ? '#FFFFFF' : AppTheme.TEXT_SECONDARY)
       .width(86)
       .height(38)
       .borderRadius(19)
-      .backgroundColor(this.currentTab === key ? '#FFFFFF' : 'transparent')
+      .backgroundColor(this.currentTab === key ? AppTheme.PRIMARY : 'transparent')
       .enabled(enabled)
       .onClick(() => {
         onTap();
@@ -480,7 +479,7 @@ struct Index {
         this.islandButton('class', '课堂', true, (): void => {
           this.switchToClassPage();
         })
-        this.islandButton('course_ai', 'AI', !GlobalState.isTeacher(), (): void => {
+        this.islandButton('course_ai', 'AI', true, (): void => {
           this.switchToAiPage();
         })
         this.islandButton('notes', '笔记', true, (): void => {
@@ -490,13 +489,15 @@ struct Index {
       .height(50)
       .padding(6)
       .borderRadius(28)
-      .backgroundColor('rgba(23,27,36,0.88)')
-      .shadow({ radius: 22, color: 'rgba(0,0,0,0.18)', offsetX: 0, offsetY: 8 })
+      .backgroundColor('rgba(255,255,255,0.88)')
+      .border({ width: 1.2, color: 'rgba(255,255,255,0.94)' })
+      .shadow({ radius: 22, color: 'rgba(31,62,68,0.13)', offsetX: 0, offsetY: 8 })
       Blank()
     }
     .width('100%')
     .height(78)
     .padding({ top: AppTheme.SPACE_M })
+    .zIndex(40)
   }
 
   @Builder
@@ -576,6 +577,7 @@ struct Index {
       y: this.recordEntryPressed ? 0.94 : 1
     })
     .animation({ duration: this.recordEntryPressed ? 90 : 180, curve: Curve.EaseOut })
+    .zIndex(20)
     .onTouch((event: TouchEvent) => {
       if (event.type === TouchType.Down) {
         this.recordEntryPressed = true;
