@@ -1,7 +1,7 @@
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppTheme } from '../common/AppTheme';
-import { ChatMessageInfo, ChatSessionInfo, Note, UiChatMessage } from '../model/Models';
+import { ChatMessageInfo, ChatSessionInfo, KB_FALLBACK_WARNING, Note, UiChatMessage } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
 
@@ -188,6 +188,41 @@ export struct AiNotePage {
     await this.persistNote('已重命名');
   }
 
+  private async deleteCurrentNote(): Promise<void> {
+    const n: Note | null = this.currentNote();
+    if (n === null || !this.canEditCurrent()) {
+      this.toast('当前笔记为只读');
+      return;
+    }
+    const result = await promptAction.showDialog({
+      title: '删除笔记',
+      message: `确定永久删除“${n.title}”吗？`,
+      buttons: [
+        { text: '取消', color: AppTheme.TEXT_SECONDARY },
+        { text: '删除', color: AppTheme.DANGER }
+      ]
+    });
+    if (result.index !== 1) {
+      return;
+    }
+    try {
+      const deletedIndex: number = this.selectedNoteIndex;
+      await Api.remove(`/notes/${n.id}?user_id=${GlobalState.userId()}`);
+      this.myNotes = this.myNotes.filter((item: Note) => item.id !== n.id);
+      this.refSelected = this.myNotes.map((item: Note) => false);
+      this.selectedNoteIndex = -1;
+      this.editorText = '';
+      this.noteTitle = '';
+      this.dirty = false;
+      if (this.myNotes.length > 0) {
+        this.selectNote(Math.min(deletedIndex, this.myNotes.length - 1));
+      }
+      this.toast('笔记已删除');
+    } catch (e) {
+      this.toast(`删除笔记失败：${(e as Error).message}`);
+    }
+  }
+
   private async selectChat(index: number): Promise<void> {
     this.selectedChatIndex = index;
     const cs: ChatSessionInfo = this.chatSessions[index];
@@ -203,11 +238,58 @@ export struct AiNotePage {
             sources = [];
           }
         }
-        const ui: UiChatMessage = { role: m.role, content: m.content, sources: sources, streaming: false };
+        let content: string = m.content;
+        let warning: string = '';
+        if (m.role === 'assistant' && content.startsWith(KB_FALLBACK_WARNING)) {
+          warning = KB_FALLBACK_WARNING;
+          content = content.substring(KB_FALLBACK_WARNING.length).trim();
+        }
+        const ui: UiChatMessage = {
+          role: m.role, content: content, sources: sources, warning: warning, streaming: false
+        };
         return ui;
       });
     } catch (e) {
       this.messages = [];
+    }
+  }
+
+  private async deleteChatSession(index: number): Promise<void> {
+    if (index < 0 || index >= this.chatSessions.length) {
+      return;
+    }
+    if (this.asking && this.selectedChatIndex === index) {
+      this.toast('当前会话正在生成回答，请稍后删除');
+      return;
+    }
+    const cs: ChatSessionInfo = this.chatSessions[index];
+    const result = await promptAction.showDialog({
+      title: '删除对话',
+      message: `确定删除“${cs.title}”及其全部消息吗？`,
+      buttons: [
+        { text: '取消', color: AppTheme.TEXT_SECONDARY },
+        { text: '删除', color: AppTheme.DANGER }
+      ]
+    });
+    if (result.index !== 1) {
+      return;
+    }
+    try {
+      await Api.remove(`/chat/sessions/${cs.id}?user_id=${GlobalState.userId()}`);
+      const wasSelected: boolean = this.selectedChatIndex === index;
+      this.chatSessions = this.chatSessions.filter((item: ChatSessionInfo) => item.id !== cs.id);
+      if (wasSelected) {
+        this.selectedChatIndex = -1;
+        this.messages = [];
+        if (this.chatSessions.length > 0) {
+          await this.selectChat(Math.min(index, this.chatSessions.length - 1));
+        }
+      } else if (this.selectedChatIndex > index) {
+        this.selectedChatIndex -= 1;
+      }
+      this.toast('对话已删除');
+    } catch (e) {
+      this.toast(`删除对话失败：${(e as Error).message}`);
     }
   }
 
@@ -270,8 +352,8 @@ export struct AiNotePage {
       this.asking = false;
       return;
     }
-    const userMsg: UiChatMessage = { role: 'user', content: q, sources: [], streaming: false };
-    const holder: UiChatMessage = { role: 'assistant', content: '', sources: [], streaming: true };
+    const userMsg: UiChatMessage = { role: 'user', content: q, sources: [], warning: '', streaming: false };
+    const holder: UiChatMessage = { role: 'assistant', content: '', sources: [], warning: '', streaming: true };
     this.messages.push(userMsg);
     this.messages.push(holder);
     this.msgScroller.scrollEdge(Edge.Bottom);
@@ -280,20 +362,34 @@ export struct AiNotePage {
       onSources: (sources: string[]) => {
         const last: UiChatMessage = this.messages[this.messages.length - 1];
         const next: UiChatMessage =
-          { role: 'assistant', content: last.content, sources: sources, streaming: true };
+          { role: 'assistant', content: last.content, sources: sources, warning: last.warning, streaming: true };
         this.replaceLastMessage(next);
+      },
+      onWarning: (msg: string) => {
+        const last: UiChatMessage = this.messages[this.messages.length - 1];
+        const next: UiChatMessage = {
+          role: 'assistant', content: last.content, sources: last.sources, warning: msg, streaming: true
+        };
+        this.replaceLastMessage(next);
+        promptAction.showToast({ message: msg, duration: 3000 });
       },
       onDelta: (delta: string) => {
         const last: UiChatMessage = this.messages[this.messages.length - 1];
         const next: UiChatMessage =
-          { role: 'assistant', content: last.content + delta, sources: last.sources, streaming: true };
+          {
+            role: 'assistant', content: last.content + delta,
+            sources: last.sources, warning: last.warning, streaming: true
+          };
         this.replaceLastMessage(next);
         this.msgScroller.scrollEdge(Edge.Bottom);
       },
       onDone: () => {
         const last: UiChatMessage = this.messages[this.messages.length - 1];
         const next: UiChatMessage =
-          { role: 'assistant', content: last.content, sources: last.sources, streaming: false };
+          {
+            role: 'assistant', content: last.content,
+            sources: last.sources, warning: last.warning, streaming: false
+          };
         this.replaceLastMessage(next);
         this.asking = false;
         this.applyPending(next.content);
@@ -304,6 +400,7 @@ export struct AiNotePage {
           role: 'assistant',
           content: last.content === '' ? `（请求失败：${msg}）` : last.content,
           sources: last.sources,
+          warning: last.warning,
           streaming: false
         };
         this.replaceLastMessage(next);
@@ -515,18 +612,32 @@ export struct AiNotePage {
         List({ space: AppTheme.SPACE_S }) {
           ForEach(this.chatSessions, (cs: ChatSessionInfo, index: number) => {
             ListItem() {
-              Text(cs.title)
-                .fontSize(AppTheme.FONT_BODY)
-                .fontColor(this.selectedChatIndex === index ? AppTheme.PRIMARY : AppTheme.TEXT_PRIMARY)
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .width('100%')
-                .padding(AppTheme.SPACE_S)
-                .borderRadius(AppTheme.RADIUS_BTN)
-                .backgroundColor(this.selectedChatIndex === index ? AppTheme.PRIMARY_LIGHT : 'transparent')
-                .onClick(() => {
-                  this.selectChat(index);
-                })
+              Row({ space: AppTheme.SPACE_XS }) {
+                Text(cs.title)
+                  .fontSize(AppTheme.FONT_BODY)
+                  .fontColor(this.selectedChatIndex === index ? AppTheme.PRIMARY : AppTheme.TEXT_PRIMARY)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .layoutWeight(1)
+                  .onClick(() => {
+                    this.selectChat(index);
+                  })
+                Text('×')
+                  .fontSize(18)
+                  .fontColor(AppTheme.TEXT_TERTIARY)
+                  .width(28)
+                  .height(28)
+                  .textAlign(TextAlign.Center)
+                  .borderRadius(14)
+                  .backgroundColor(AppTheme.tagBg(AppTheme.DANGER))
+                  .onClick(() => {
+                    this.deleteChatSession(index);
+                  })
+              }
+              .width('100%')
+              .padding(AppTheme.SPACE_S)
+              .borderRadius(AppTheme.RADIUS_BTN)
+              .backgroundColor(this.selectedChatIndex === index ? AppTheme.PRIMARY_LIGHT : 'transparent')
             }
           }, (cs: ChatSessionInfo) => `${cs.id}`)
         }
@@ -573,6 +684,14 @@ export struct AiNotePage {
             .borderRadius(999)
             .onClick(() => {
               this.saveNote();
+            })
+          Button('删除')
+            .fontSize(AppTheme.FONT_BODY)
+            .backgroundColor(AppTheme.tagBg(AppTheme.DANGER))
+            .fontColor(AppTheme.DANGER)
+            .borderRadius(AppTheme.RADIUS_BTN)
+            .onClick(() => {
+              this.deleteCurrentNote();
             })
         } else if (this.currentNote() !== null) {
           Text('只读')
@@ -689,6 +808,36 @@ export struct AiNotePage {
               Text(m.role === 'user' ? '我' : 'AI')
                 .fontSize(AppTheme.FONT_CAPTION)
                 .fontColor(m.role === 'user' ? AppTheme.PRIMARY : AppTheme.SUCCESS)
+              if (m.warning !== '') {
+                Row({ space: 8 }) {
+                  Text('!')
+                    .fontSize(12)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor('#9A5B00')
+                    .width(22)
+                    .height(22)
+                    .textAlign(TextAlign.Center)
+                    .borderRadius(11)
+                    .backgroundColor('#FFE3A3')
+                  Column({ space: 2 }) {
+                    Text('知识库提示')
+                      .fontSize(AppTheme.FONT_CAPTION)
+                      .fontWeight(FontWeight.Bold)
+                      .fontColor('#8A5200')
+                    Text(m.warning)
+                      .fontSize(AppTheme.FONT_CAPTION)
+                      .fontColor('#9A640F')
+                      .lineHeight(18)
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
+                }
+                .width('100%')
+                .padding({ left: 9, right: 9, top: 8, bottom: 8 })
+                .borderRadius(12)
+                .backgroundColor('#FFF7E6')
+                .border({ width: 1, color: '#F3CF85' })
+              }
               Text(m.content + (m.streaming ? ' ▌' : ''))
                 .fontSize(AppTheme.FONT_BODY)
                 .fontColor(AppTheme.TEXT_PRIMARY)

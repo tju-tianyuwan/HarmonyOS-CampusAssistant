@@ -43,11 +43,25 @@ def add_document(class_course_id: int, doc_id: str, text: str, source: str) -> i
     return len(chunks)
 
 
+def delete_document(class_course_id: int, doc_id: str) -> None:
+    """删除文档的全部向量分块；重复调用保持幂等。"""
+    _collection(class_course_id).delete(where={"doc_id": doc_id})
+
+
 def query(class_course_id: int, question: str, top_k: int = 4) -> list[dict]:
     col = _collection(class_course_id)
     if col.count() == 0:
         return []
-    res = col.query(query_texts=[question], n_results=min(top_k, col.count()))
+    res = col.query(
+        query_texts=[question],
+        n_results=min(top_k, col.count()),
+        include=["documents", "metadatas", "distances"],
+    )
     docs = res["documents"][0] if res["documents"] else []
     metas = res["metadatas"][0] if res["metadatas"] else []
-    return [{"text": d, "source": m.get("source", "")} for d, m in zip(docs, metas)]
+    distances = res["distances"][0] if res["distances"] else []
+    return [
+        {"text": doc, "source": meta.get("source", "")}
+        for doc, meta, distance in zip(docs, metas, distances)
+        if distance <= settings.rag_max_distance
+    ]

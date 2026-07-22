@@ -63,6 +63,19 @@ def update_note(note_id: int, body: NoteUpdate, db: Session = Depends(get_db)):
     return n
 
 
+@router.delete("/{note_id}")
+def delete_note(note_id: int, user_id: int, db: Session = Depends(get_db)):
+    n = db.get(Note, note_id)
+    if not n:
+        raise HTTPException(404, "笔记不存在")
+    if n.owner_id != user_id:
+        raise HTTPException(403, "只能删除自己的笔记")
+    rag.delete_document(n.class_course_id, f"note_{n.id}")
+    db.delete(n)
+    db.commit()
+    return {"ok": True, "id": note_id}
+
+
 @router.post("/{note_id}/share")
 async def share_note(note_id: int, db: Session = Depends(get_db)):
     """共享 → LLM 质量评估 → 通过则入该集合知识库（仅 MD 笔记）"""
@@ -96,6 +109,7 @@ def unshare_note(note_id: int, db: Session = Depends(get_db)):
     n = db.get(Note, note_id)
     if not n:
         raise HTTPException(404, "笔记不存在")
+    rag.delete_document(n.class_course_id, f"note_{n.id}")
     n.visibility = "private"
     db.commit()
     db.refresh(n)

@@ -97,10 +97,14 @@ export interface HandwritingDoc {
 }
 
 /** 问答界面的本地消息模型（含流式中间态） */
+export const KB_FALLBACK_WARNING: string =
+  '知识库中暂时未包含该知识点，以下内容可能有误，请结合课程资料核对。';
+
 export interface UiChatMessage {
   role: string;
   content: string;
   sources: string[];
+  warning: string;
   streaming: boolean;
 }
 

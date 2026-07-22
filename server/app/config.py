@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     embed_base_url: str = ""
     embed_api_key: str = ""
     embed_model: str = ""
+    rag_max_distance: float = 1.0
 
     asr_provider: str = "mock"
 

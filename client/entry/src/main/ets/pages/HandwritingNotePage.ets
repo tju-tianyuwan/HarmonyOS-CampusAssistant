@@ -160,6 +160,41 @@ export struct HandwritingNotePage {
     await this.persistNote('已重命名');
   }
 
+  private async deleteCurrentNote(): Promise<void> {
+    const n: Note | null = this.current();
+    if (n === null || !this.canEditCurrent()) {
+      this.toast('当前笔记为只读');
+      return;
+    }
+    const result = await promptAction.showDialog({
+      title: '删除笔记',
+      message: `确定永久删除“${n.title}”吗？`,
+      buttons: [
+        { text: '取消', color: AppTheme.TEXT_SECONDARY },
+        { text: '删除', color: AppTheme.DANGER }
+      ]
+    });
+    if (result.index !== 1) {
+      return;
+    }
+    try {
+      const deletedIndex: number = this.selectedIndex;
+      await Api.remove(`/notes/${n.id}?user_id=${GlobalState.userId()}`);
+      this.notes = this.notes.filter((item: Note) => item.id !== n.id);
+      this.selectedIndex = -1;
+      this.editorText = '';
+      this.noteTitle = '';
+      this.dirty = false;
+      this.boardKey += 1;
+      if (this.notes.length > 0) {
+        this.selectNote(Math.min(deletedIndex, this.notes.length - 1));
+      }
+      this.toast('笔记已删除');
+    } catch (e) {
+      this.toast(`删除笔记失败：${(e as Error).message}`);
+    }
+  }
+
   private async toggleShare(): Promise<void> {
     const n: Note | null = this.current();
     if (n === null || !this.canEditCurrent()) {
@@ -270,6 +305,15 @@ export struct HandwritingNotePage {
           .borderRadius(999)
           .onClick(() => {
             this.saveNote();
+          })
+        Button('删除')
+          .fontSize(AppTheme.FONT_BODY)
+          .height(40)
+          .backgroundColor(AppTheme.tagBg(AppTheme.DANGER))
+          .fontColor(AppTheme.DANGER)
+          .borderRadius(AppTheme.RADIUS_BTN)
+          .onClick(() => {
+            this.deleteCurrentNote();
           })
         Button(this.sharing ? '…' :
           (this.current() !== null && this.current()!.visibility === 'private' ? '共享' : '取消共享'))

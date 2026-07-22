@@ -4,6 +4,7 @@ import { util } from '@kit.ArkTS';
 /** SSE 流式回调 */
 export interface StreamCallbacks {
   onSources: (sources: string[]) => void;
+  onWarning: (msg: string) => void;
   onDelta: (delta: string) => void;
   onDone: () => void;
   onError: (msg: string) => void;
@@ -29,6 +30,10 @@ export class Api {
 
   static async put(path: string, body: object): Promise<string> {
     return Api.request(path, http.RequestMethod.PUT, JSON.stringify(body));
+  }
+
+  static async remove(path: string): Promise<string> {
+    return Api.request(path, http.RequestMethod.DELETE, undefined);
   }
 
   private static async request(path: string, method: http.RequestMethod,
@@ -127,6 +132,18 @@ export class Api {
         } catch (e) {
           cb.onSources([]);
         }
+      } else if (currentEvent === 'error') {
+        try {
+          finish(JSON.parse(data) as string);
+        } catch (e) {
+          finish(data);
+        }
+      } else if (currentEvent === 'warning') {
+        try {
+          cb.onWarning(JSON.parse(data) as string);
+        } catch (e) {
+          cb.onWarning(data);
+        }
       } else if (currentEvent === 'done') {
         finish(null);
       } else {
@@ -150,7 +167,7 @@ export class Api {
       }
     });
     client.on('dataEnd', () => {
-      finish(null);
+      finish('响应流意外中断');
     });
 
     interface AskBody {

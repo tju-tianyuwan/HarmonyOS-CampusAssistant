@@ -47,6 +47,35 @@ export struct PersonalNotePage {
     return n.content.trim();
   }
 
+  private openNote(n: Note): void {
+    if (n.kind === 'md') {
+      this.onOpenAiNote(n.id);
+    } else {
+      this.onOpenHandwritingNote(n.id);
+    }
+  }
+
+  private async deleteNote(n: Note): Promise<void> {
+    const result = await promptAction.showDialog({
+      title: '删除笔记',
+      message: `确定永久删除“${n.title}”吗？`,
+      buttons: [
+        { text: '取消', color: AppTheme.TEXT_SECONDARY },
+        { text: '删除', color: AppTheme.DANGER }
+      ]
+    });
+    if (result.index !== 1) {
+      return;
+    }
+    try {
+      await Api.remove(`/notes/${n.id}?user_id=${GlobalState.userId()}`);
+      this.notes = this.notes.filter((item: Note) => item.id !== n.id);
+      this.toast('笔记已删除');
+    } catch (e) {
+      this.toast(`删除笔记失败：${(e as Error).message}`);
+    }
+  }
+
   @Builder
   pageHeader() {
     Row({ space: AppTheme.SPACE_M }) {
@@ -92,6 +121,12 @@ export struct PersonalNotePage {
         Text(n.visibility === 'shared' ? '共享' : '私有')
           .fontSize(AppTheme.FONT_CAPTION)
           .fontColor(n.visibility === 'shared' ? AppTheme.SUCCESS : AppTheme.TEXT_TERTIARY)
+        Text('删除')
+          .fontSize(AppTheme.FONT_CAPTION)
+          .fontColor(AppTheme.DANGER)
+          .onClick(() => {
+            this.deleteNote(n);
+          })
       }
       .width('100%')
 
@@ -101,11 +136,17 @@ export struct PersonalNotePage {
         .fontColor(AppTheme.TEXT_PRIMARY)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .onClick(() => {
+          this.openNote(n);
+        })
       Text(this.noteExcerpt(n))
         .fontSize(AppTheme.FONT_CAPTION)
         .fontColor(AppTheme.TEXT_SECONDARY)
         .maxLines(3)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .onClick(() => {
+          this.openNote(n);
+        })
       Blank()
       Text(n.updated_at)
         .fontSize(10)
@@ -118,13 +159,6 @@ export struct PersonalNotePage {
     .backgroundColor(AppTheme.BG_CARD)
     .shadow({ radius: 18, color: 'rgba(0,0,0,0.06)', offsetX: 0, offsetY: 6 })
     .alignItems(HorizontalAlign.Start)
-    .onClick(() => {
-      if (n.kind === 'md') {
-        this.onOpenAiNote(n.id);
-      } else {
-        this.onOpenHandwritingNote(n.id);
-      }
-    })
   }
 
   @Builder

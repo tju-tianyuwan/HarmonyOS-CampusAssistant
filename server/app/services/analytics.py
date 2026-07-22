@@ -184,3 +184,41 @@ async def record_question(
                 )
             )
     db.commit()
+
+
+def rebuild_keyword_stats(db: Session, class_course_id: int) -> None:
+    """根据剩余问题日志重建课程关键词统计，用于会话删除后的数据一致性。"""
+    old_stats = db.exec(
+        select(KeywordStat).where(KeywordStat.class_course_id == class_course_id)
+    ).all()
+    for stat in old_stats:
+        db.delete(stat)
+
+    logs = db.exec(
+        select(QuestionLog).where(QuestionLog.class_course_id == class_course_id)
+    ).all()
+    counts: dict[str, int] = {}
+    last_seen: dict[str, datetime] = {}
+    for log in logs:
+        try:
+            words = json.loads(log.keywords)
+        except json.JSONDecodeError:
+            words = []
+        if not isinstance(words, list):
+            continue
+        for raw_word in words:
+            word = str(raw_word)
+            counts[word] = counts.get(word, 0) + 1
+            previous = last_seen.get(word)
+            if previous is None or log.created_at > previous:
+                last_seen[word] = log.created_at
+
+    for word, count in counts.items():
+        db.add(
+            KeywordStat(
+                class_course_id=class_course_id,
+                keyword=word,
+                count=count,
+                last_seen_at=last_seen[word],
+            )
+        )
