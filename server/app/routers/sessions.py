@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from ..db import get_db
 from ..models import ClassCourse, CourseSession, Outline, TranscriptSegment, User
 from ..services import rag
-from ..services.asr import get_asr_provider
+from ..services.asr import ASRError, get_asr_provider
 from ..services.llm import chat
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -116,12 +116,15 @@ def create_session(body: CreateSession, db: Session = Depends(get_db)):
 
 @router.post("/{session_id}/chunks/{seq}")
 async def upload_chunk(session_id: int, seq: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """上传音频分片 → 云端 ASR（当前 Mock）→ 返回并保存转写分段"""
+    """上传音频分片 → 可配置 ASR 提供商 → 返回并保存转写分段。"""
     s = db.get(CourseSession, session_id)
     if not s:
         raise HTTPException(404, "课时不存在")
     audio = await file.read()
-    result = await get_asr_provider().transcribe_chunk(audio, seq)
+    try:
+        result = await get_asr_provider().transcribe_chunk(audio, seq)
+    except ASRError as exc:
+        raise HTTPException(502, str(exc)) from exc
     old = db.exec(
         select(TranscriptSegment).where(TranscriptSegment.session_id == session_id, TranscriptSegment.seq == seq)
     ).first()

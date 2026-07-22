@@ -10,6 +10,10 @@ class ASRResult:
     end_ms: int
 
 
+class ASRError(RuntimeError):
+    """可安全返回给客户端的 ASR 配置或调用错误。"""
+
+
 class ASRProvider(ABC):
     """提交一个音频分片，返回该分片的转写结果。"""
 

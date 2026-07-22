@@ -12,7 +12,7 @@ _SCRIPT = [
     "大家注意，这部分是期末考试的重点内容，务必掌握三种遍历的递归与非递归实现。",
 ]
 
-_CHUNK_MS = 60_000
+_CHUNK_MS = 4_000
 
 
 class MockASRProvider(ASRProvider):

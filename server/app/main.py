@@ -8,6 +8,7 @@ from .config import settings
 from .db import engine, init_db
 from .models import ClassCourse, CourseSession, Membership, Note, TranscriptSegment, User
 from .routers import analytics, auth, chat, courses, notes, sessions
+from .services.asr import is_asr_configured
 
 app = FastAPI(title="智慧伴学 Demo API")
 app.add_middleware(
@@ -20,7 +21,12 @@ for r in (auth.router, courses.router, sessions.router, notes.router, chat.route
 
 @app.get("/health")
 def health():
-    return {"ok": True, "asr_provider": settings.asr_provider, "llm_configured": bool(settings.llm_api_key)}
+    return {
+        "ok": True,
+        "asr_provider": settings.asr_provider,
+        "asr_configured": is_asr_configured(),
+        "llm_configured": bool(settings.llm_api_key),
+    }
 
 
 def seed():

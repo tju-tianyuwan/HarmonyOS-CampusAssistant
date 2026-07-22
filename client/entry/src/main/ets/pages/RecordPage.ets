@@ -233,6 +233,9 @@ export struct RecordPage {
       this.scroller.scrollEdge(Edge.Bottom);
     } catch (e) {
       this.uploadFailures += 1;
+      if (this.uploadFailures === 1) {
+        this.toast(`语音转写失败：${(e as Error).message}`);
+      }
     }
   }
 

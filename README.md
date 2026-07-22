@@ -35,7 +35,31 @@ cp .env.example .env                                # 按需填 LLM_API_KEY（�
 - 预置数据：教师「王老师」+学生「小明/小红」，示例集合「计科2301-数据结构」，邀请码 `888888`，1 节已转写课时。
 
 ### 关键设计
-- **ASR 适配层**（`app/services/asr/`）：`ASRProvider` 抽象接口，默认 `MockASRProvider` 返回预置课堂文本；接入华为云 SIS / 讯飞时新增实现类并在 `__init__.py` 注册，改 `.env` 的 `ASR_PROVIDER` 即可切换。
+- **ASR 适配层**（`app/services/asr/`）：`ASRProvider` 抽象接口，默认 `MockASRProvider` 返回预置课堂文本；支持 OpenAI-compatible `/audio/transcriptions` 与华为云 SIS 短语音识别。客户端统一上传 16kHz/单声道/S16LE PCM，每片约 4 秒。
+
+真实 ASR 配置示例：
+
+```env
+ASR_PROVIDER=openai
+ASR_BASE_URL=https://api.openai.com/v1
+ASR_API_KEY=ASR_API_KEY
+ASR_MODEL=whisper-1
+ASR_LANGUAGE=zh
+```
+
+华为云 SIS 配置示例：
+
+```env
+ASR_PROVIDER=huawei_sis
+SIS_AK=你的访问密钥ID
+SIS_SK=你的秘密访问密钥
+SIS_PROJECT_ID=区域项目ID
+SIS_REGION=cn-north-4
+SIS_PROPERTY=chinese_16k_general
+SIS_AUDIO_FORMAT=pcm16k16bit
+```
+
+`SIS_PROJECT_ID` 必须与 `SIS_REGION` 对应；如果使用控制台热词表，可额外填写 `SIS_VOCABULARY_ID`。
 - **LLM**（`app/services/llm.py`）：OpenAI 兼容协议，`base_url/api_key/model` 可配；未配 key 时降级 Mock，保证离线可演示。
 - **知识库隔离**（`app/services/rag.py`）：Chroma 按 `class_course_id` 分 collection（`cc_<id>`），检索强制携带集合 ID，跨集合零共享。已验证：向集合 A 发布提纲后，集合 B 问同样问题返回「本课程资料中未找到」。
 
@@ -78,7 +102,7 @@ cd server
 录音分片上传→Mock 转写落库→生成 Markdown 提纲→教师发布入知识库→集合限定问答（带引用来源、流式）→跨集合隔离→笔记共享质量评估入库，均已通过接口冒烟测试。
 
 ## 待办（Demo 后）
-- 接入真实云端 ASR（实现 `ASRProvider`）
+- 按实际课堂环境调优 SIS 模型与热词表
 - 真机验证：手写压感（MatePad + M-Pencil）、NFC 碰一碰（NDEF 标签）、局域网互抓（两台真机同 WLAN）、跨端接续（同华为账号）
 - UI 动画、Markdown 富渲染、PDF 导出
 

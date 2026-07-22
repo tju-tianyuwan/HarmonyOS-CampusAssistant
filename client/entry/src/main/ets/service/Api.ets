@@ -81,7 +81,7 @@ export class Api {
       if (resp.responseCode >= 200 && resp.responseCode < 300) {
         return resp.result as string;
       }
-      throw new Error(`HTTP ${resp.responseCode}`);
+      throw new Error(`HTTP ${resp.responseCode}: ${resp.result as string}`);
     } finally {
       client.destroy();
     }
