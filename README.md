@@ -1,110 +1,109 @@
-# 智慧伴学系统 Demo
+# 智慧伴学（智伴）
 
-面向鸿蒙生态的课堂 AI 协同学习工具。本仓库为 Demo 阶段代码，跑通「录音 → 云端转写 → RAG 提纲/问答 → 班级共享」核心闭环。
+面向 HarmonyOS 的课堂 AI 协同学习 Demo，覆盖课程工作台、课堂录音转写、课程提纲、个人与班级笔记、MAS 多智能体讨论和 AI 选择题练习。
 
-- 需求文档：`产品需求文档.md`
-- 实现流程：`实现流程.md`
+![课程概览](演示图/frontend-overview.jpeg)
 
-## 目录结构
+## 功能概览
 
-```
-note/
-├─ server/        FastAPI 服务端（业务 + AI 层）
-├─ client/        HarmonyOS ArkTS 客户端（横屏，6 页面）
+- **课程工作台**：按课程显示官方课时、个人笔记和班级笔记统计，每 3 秒同步一次服务端快照。
+- **课堂记录**：采集 16 kHz 单声道 PCM 音频，分片上传 ASR，并基于转写生成 Markdown 提纲。
+- **课程知识库**：发布的官方提纲和通过质量评估的共享笔记进入 Chroma，按课程 collection 隔离。
+- **AI 与 MAS**：支持单助手问答，以及分析、质疑、类比、总结等不同性格智能体参与的课堂讨论。
+- **笔记工作台**：支持 Markdown/AI 笔记、矢量手写笔记、个人管理、班级共享和再次编辑。
+- **刷题**：根据课程知识库、知识点、难度和用户要求生成选择题，提供判题与解析。
+- **HarmonyOS 协同**：包含 NFC 标签接续、局域网发现与笔记互抓、跨端状态接续的 Demo 实现。
+
+## 两种运行模式
+
+| 目录 | 用途 | 后端 |
+| --- | --- | --- |
+| `client/` + `server/` | 日常开发和实际前后端联调 | FastAPI + SQLite + Chroma + 可配置 LLM/ASR |
+| `competition-unified/` | 比赛单 HAP 演示 | HAP 内嵌 ArkTS 本地后端，无需 Python 服务 |
+
+统一比赛版保持与网络版相同的页面 API，但 AI、ASR 和知识检索采用离线演示逻辑，不包含 Python、Chroma 或第三方模型运行时。实际部署应使用 `client/` 与 `server/` 的前后端分离结构。
+
+## 项目结构
+
+```text
+HarmonyOS-CampusAssistant/
+├─ client/                 HarmonyOS ArkTS 网络版客户端
+├─ server/                 FastAPI 业务、AI、ASR 与 RAG 服务
+├─ competition-unified/    单 HAP 比赛版源码
+├─ image/README/           README 图片资源
+├─ 演示图/                  功能演示截图
 ├─ 产品需求文档.md
 └─ 实现流程.md
 ```
 
-## 服务端
+## 启动网络后端
 
-技术栈：FastAPI + SQLModel(SQLite) + Chroma + OpenAI 兼容 LLM。
+要求 Python 3.11+。PowerShell 示例：
 
-```bash
+```powershell
 cd server
 python -m venv .venv
-.venv/Scripts/pip install -r requirements.txt      # Windows；Linux/mac 用 .venv/bin/pip
-cp .env.example .env                                # 按需填 LLM_API_KEY（不填走 Mock）
-.venv/Scripts/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Copy-Item .env.example .env
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-> 绑定 `0.0.0.0` 是为了让模拟器/局域网真机能访问；仅本机调试可省略 `--host`。
+启动后可访问：
 
-启动后：
-- API 文档：http://127.0.0.1:8000/docs
-- 健康检查：http://127.0.0.1:8000/health
-- 预置数据：教师「王老师」+学生「小明/小红」，示例集合「计科2301-数据结构」，邀请码 `888888`，1 节已转写课时。
+- 健康检查：`http://127.0.0.1:8000/health`
+- Swagger API：`http://127.0.0.1:8000/docs`
+- API 前缀：`http://127.0.0.1:8000/api/v1`
 
-### 关键设计
-- **ASR 适配层**（`app/services/asr/`）：`ASRProvider` 抽象接口，默认 `MockASRProvider` 返回预置课堂文本；支持 OpenAI-compatible `/audio/transcriptions` 与华为云 SIS 短语音识别。客户端统一上传 16kHz/单声道/S16LE PCM，每片约 4 秒。
+`.env.example` 包含 DeepSeek/OpenAI 兼容 LLM、OpenAI 兼容 ASR、华为云 SIS、Embedding、数据库和存储目录配置。未配置 LLM 或 ASR 密钥时使用 Demo 降级实现。
 
-真实 ASR 配置示例：
+## 运行网络版客户端
 
-```env
-ASR_PROVIDER=openai
-ASR_BASE_URL=https://api.openai.com/v1
-ASR_API_KEY=ASR_API_KEY
-ASR_MODEL=whisper-1
-ASR_LANGUAGE=zh
+1. 使用 DevEco Studio 6.0+ 打开 `client/`。
+2. 等待 Hvigor Sync 完成。
+3. 在 `Project Structure > Signing Configs` 中为本机生成调试或发布签名。
+4. 启动 API 12+ 的 Tablet、2in1 或 Phone 设备，运行 `entry` 模块。
+5. 模拟器默认通过 `http://10.0.2.2:8000/api/v1` 访问宿主机；真机请在应用设置页填写电脑局域网地址。
+
+签名证书、密码、HAP、`oh_modules` 和构建缓存均不进入 Git 仓库。
+
+## 构建单 HAP 比赛版
+
+1. 使用 DevEco Studio 打开 `competition-unified/client/`。
+2. 完成 Hvigor Sync，并为当前开发机配置签名。
+3. 选择 `entry` 模块和 `release` 构建模式。
+4. 执行 `Build > Build Hap(s)/APP(s) > Build Hap(s)`。
+
+默认输出目录：
+
+```text
+competition-unified/client/entry/build/default/outputs/default/
 ```
 
-华为云 SIS 配置示例：
+应用启动时由 `EntryAbility.onCreate()` 初始化内嵌后端，数据保存在 HarmonyOS 应用沙箱的 `zhiban_local_backend.json` 中。无需启动桌面端服务。
 
-```env
-ASR_PROVIDER=huawei_sis
-SIS_AK=你的访问密钥ID
-SIS_SK=你的秘密访问密钥
-SIS_PROJECT_ID=区域项目ID
-SIS_REGION=cn-north-4
-SIS_PROPERTY=chinese_16k_general
-SIS_AUDIO_FORMAT=pcm16k16bit
-```
+## 数据隔离
 
-`SIS_PROJECT_ID` 必须与 `SIS_REGION` 对应；如果使用控制台热词表，可额外填写 `SIS_VOCABULARY_ID`。
-- **LLM**（`app/services/llm.py`）：OpenAI 兼容协议，`base_url/api_key/model` 可配；未配 key 时降级 Mock，保证离线可演示。
-- **知识库隔离**（`app/services/rag.py`）：Chroma 按 `class_course_id` 分 collection（`cc_<id>`），检索强制携带集合 ID，跨集合零共享。已验证：向集合 A 发布提纲后，集合 B 问同样问题返回「本课程资料中未找到」。
+网络版当前使用一个业务数据库，通过 `class_course_id` 对课程、课时、笔记、会话和统计进行逻辑隔离；Chroma 使用 `cc_<class_course_id>` 独立 collection。比赛版使用一个应用沙箱 JSON 文件，并在每条记录上保存课程 ID。
 
-### API 概览（前缀 `/api/v1`）
-| 模块 | 端点 |
-|------|------|
-| auth | `GET /auth/users` |
-| courses | `GET/POST /courses`、`POST /courses/join`、`GET /courses/{id}/stats`（课程工作台真实统计） |
-| sessions | 创建课时、`POST /sessions/{id}/chunks/{seq}` 上传分片转写、`POST .../outline/generate` 生成提纲、`POST .../outline/review` 教师审核发布 |
-| notes | 笔记 CRUD、`POST /notes/{id}/share` 共享+质量评估入库 |
-| chat | 会话管理、`POST /chat/ask` 集合限定 SSE 流式问答 |
-| practice | `POST /practice/generate` 基于课程知识库与用户要求生成选择题 |
-
-## 客户端
-
-技术栈：HarmonyOS NEXT + ArkTS/ArkUI（Stage 模型，API 12+）。横屏锁定，**Notein 风格**（#F7F7FA 底、白卡片、墨黑胶囊按钮、#21D5CE 青色点缀）。
-
-结构（仿 Notein 两级形态）：登录 → **课程库**（彩色封面网格 + FAB 创建/加入）→ **课程工作台**（左侧窄图标栏：概览/录音/课时/AI 笔记/笔记/审核(教师)/协同）。
-
-页面：概览（统计+邀请码复制+最近课时）/ 录音（圆形录制钮，AudioCapturer 分片上传实时转写，无麦克风自动降级模拟）/ 课时详情三栏 / AI 笔记（Obsidian 式：SSE 流式问答、划词命令、插入/替换/@引用）/ 刷题（按课程知识库、模式、知识点、难度和自由要求调用 AI 生成选择题，并提供答题判定与解析）/ 笔记（MD + 手写悬浮笔盒：5 色 3 档笔宽压感预留）/ 教师审核 / **协同**（NFC 碰一碰写卡入班、局域网 UDP 发现 + TCP 互抓笔记、跨端接续快照，均需真机）。
-
-**联调地址**：`client/.../service/Api.ets` 的 `BASE_URL` 默认 `http://10.0.2.2:8000/api/v1`（模拟器经 QEMU NAT 访问宿主机回环）。若不通改为电脑局域网 IP；真机联调必须用局域网 IP 且服务端 `--host 0.0.0.0`。
+如需重置网络版 Demo 数据，停止服务后删除 `server/smartstudy.db` 和 `server/data/`，再次启动会恢复种子数据。
 
 ## 测试
 
-### 服务端一键冒烟测试
-```bash
+安装服务端依赖后运行：
+
+```powershell
 cd server
-.venv/Scripts/python -m uvicorn app.main:app --port 8000   # 终端1：启动服务
-.venv/Scripts/python smoke_test.py                          # 终端2：跑测试
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
-`smoke_test.py` 覆盖健康检查、课程创建与加入、录音转写、提纲发布、集合限定问答、知识库 AI 选择题生成、跨集合隔离、笔记共享质量评估和课程统计。全部 PASS 即服务端正常。
 
-### 手动调试
-浏览器打开 http://127.0.0.1:8000/docs（Swagger UI），可逐个接口点 "Try it out" 调试；SSE 问答接口建议用 curl：`curl -N -X POST .../api/v1/chat/ask -H "Content-Type: application/json" -d @body.json`。
+完整接口冒烟测试需要先启动后端：
 
-### 重置演示数据
-删除 `server/smartstudy.db` 和 `server/data/` 后重启服务，将重新生成预置数据（两者必须一起删，保持业务库与向量库一致）。
+```powershell
+.\.venv\Scripts\python.exe smoke_test.py
+```
 
-## 已验证的闭环
-录音分片上传→Mock 转写落库→生成 Markdown 提纲→教师发布入知识库→集合限定问答（带引用来源、流式）→跨集合隔离→笔记共享质量评估入库，均已通过接口冒烟测试。
+当前单元测试覆盖课程统计隔离、MAS 角色编排和刷题 JSON 校验；`smoke_test.py` 覆盖课程、录音、提纲、问答、刷题、共享笔记和统计闭环。
 
-## 待办（Demo 后）
-- 按实际课堂环境调优 SIS 模型与热词表
-- 真机验证：手写压感（MatePad + M-Pencil）、NFC 碰一碰（NDEF 标签）、局域网互抓（两台真机同 WLAN）、跨端接续（同华为账号）
-- UI 动画、Markdown 富渲染、PDF 导出
+## Demo 说明
 
-> 夜间自主迭代的详细改动与测试指引见《交接说明.md》。
+当前账号页使用预置用户直接选择身份，适合比赛演示和本地联调。面向真实用户部署前，需要补充正式登录认证、接口级所有权校验、局域网传输认证/加密、数据库迁移与发布签名流程。

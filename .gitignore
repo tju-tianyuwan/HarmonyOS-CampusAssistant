@@ -1,28 +1,18 @@
-﻿# 虚拟环境
+# Python environments and caches
 .venv/
 venv/
 env/
-# 压缩包
-*.zip
-*.rar
-*.7z
-*.tar.gz
-# 二进制文件
-*.pyd
-*.dll
-*.so
-# 缓存
-__pycache__/
-*.pyc
-*.log
-.codex-run/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
 
-# 环境变量
+# Local configuration and runtime data
 .env
 *.env
 !.env.example
-
-# 本地数据库和运行数据
+*.log
+.codex-run/
 *.db
 *.db-shm
 *.db-wal
@@ -30,11 +20,33 @@ __pycache__/
 *.sqlite3
 data/
 
-# HarmonyOS / DevEco Studio 生成物
-.hvigor/
-oh_modules/
-build/
-entry/build/
-.idea/
+# HarmonyOS / DevEco Studio generated files
+**/.hvigor/
+**/oh_modules/
+**/node_modules/
+**/build/
+**/.idea/
+**/.build-home/
+**/.test/
+**/.appanalyzer/
+**/.cxx/
+**/.clangd/
+local.properties
+
+# Packages and generated inspection artifacts
+dist/
+**/dist/
 *.hap
 *.hsp
+*.zip
+*.rar
+*.7z
+*.tar.gz
+competition-unified/.hap-inspect-*/
+competition-unified/layout-*.json
+competition-unified/zhiban-*.png
+
+# Native build outputs
+*.pyd
+*.dll
+*.so
