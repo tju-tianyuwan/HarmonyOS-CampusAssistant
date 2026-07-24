@@ -65,3 +65,18 @@ def query(class_course_id: int, question: str, top_k: int = 4) -> list[dict]:
         for doc, meta, distance in zip(docs, metas, distances)
         if distance <= settings.rag_max_distance
     ]
+
+
+def list_chunks(class_course_id: int, limit: int = 8) -> list[dict]:
+    """按课程读取知识库片段，用于综合组卷时补充多知识点覆盖。"""
+    col = _collection(class_course_id)
+    if col.count() == 0:
+        return []
+    result = col.get(limit=min(limit, col.count()), include=["documents", "metadatas"])
+    documents = result.get("documents") or []
+    metadatas = result.get("metadatas") or []
+    return [
+        {"text": document, "source": metadata.get("source", "")}
+        for document, metadata in zip(documents, metadatas)
+        if isinstance(document, str) and document.strip()
+    ]

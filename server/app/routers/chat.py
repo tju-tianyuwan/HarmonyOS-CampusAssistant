@@ -3,7 +3,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from ..db import get_db, engine
@@ -11,6 +11,13 @@ from ..models import ChatMessage, ChatSession, ClassCourse, QuestionLog, User
 from ..services.analytics import rebuild_keyword_stats, record_question
 from ..services import rag
 from ..services.llm import chat_stream
+from ..services.mas import (
+    build_agent_system,
+    build_agent_user,
+    public_agents,
+    role_for_agent,
+    select_agents,
+)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -38,6 +45,13 @@ class AskBody(BaseModel):
     chat_session_id: int
     question: str
     context_note: str = ""  # 「携带当前笔记作为上下文」时客户端传入
+    mode: str = "single"
+    agent_ids: list[str] = Field(default_factory=list)
+
+
+@router.get("/agents")
+def list_agents():
+    return public_agents()
 
 
 @router.get("/sessions")
@@ -93,7 +107,7 @@ def delete_chat_session(chat_session_id: int, user_id: int, db: Session = Depend
 
 @router.post("/ask")
 async def ask(body: AskBody, db: Session = Depends(get_db)):
-    """集合限定问答，SSE 流式返回。事件：sources（引用）→ delta*N → done"""
+    """课程问答。单助手或 MAS 圆桌均通过 SSE 流式返回。"""
     cs = db.get(ChatSession, body.chat_session_id)
     if not cs:
         raise HTTPException(404, "会话不存在")
@@ -122,7 +136,7 @@ async def ask(body: AskBody, db: Session = Depends(get_db)):
             db.rollback()
     sources = [h["source"] for h in hits]
 
-    async def gen():
+    async def gen_single():
         yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"
         full = ""
         try:
@@ -157,8 +171,50 @@ async def ask(body: AskBody, db: Session = Depends(get_db)):
             return
         yield "event: done\ndata: {}\n\n"
 
+    async def gen_mas():
+        yield f"event: sources\ndata: {json.dumps(sources, ensure_ascii=False)}\n\n"
+        if not hits:
+            yield f"event: warning\ndata: {json.dumps(KB_WARNING, ensure_ascii=False)}\n\n"
+
+        course_context = "\n---\n".join(h["text"] for h in hits)
+        if body.context_note.strip():
+            memory = body.context_note.strip()
+        else:
+            memory = ""
+        discussion: list[tuple[str, str]] = []
+
+        try:
+            for agent in select_agents(body.agent_ids):
+                yield f"event: agent\ndata: {json.dumps(agent.public_dict(), ensure_ascii=False)}\n\n"
+                system = build_agent_system(agent, course_context, memory, bool(hits))
+                user_prompt = build_agent_user(body.question, discussion)
+                full = ""
+                async for delta in chat_stream(system, user_prompt):
+                    full += delta
+                    yield f"data: {json.dumps(delta, ensure_ascii=False)}\n\n"
+
+                discussion.append((agent.name, full))
+                with Session(engine) as db2:
+                    db2.add(
+                        ChatMessage(
+                            chat_session_id=chat_session_id,
+                            role=role_for_agent(agent),
+                            content=full,
+                            sources=json.dumps(sources, ensure_ascii=False),
+                        )
+                    )
+                    db2.commit()
+                yield f"event: agent_done\ndata: {json.dumps(agent.id, ensure_ascii=False)}\n\n"
+        except Exception:
+            logger.exception("MAS stream failed for chat session %s", chat_session_id)
+            yield f"event: error\ndata: {json.dumps('AI 圆桌讨论失败，请稍后重试。', ensure_ascii=False)}\n\n"
+            return
+        yield "event: done\ndata: {}\n\n"
+
+    use_mas = body.mode == "mas" and asker is not None and asker.role == "student"
+
     return StreamingResponse(
-        gen(),
+        gen_mas() if use_mas else gen_single(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

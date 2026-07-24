@@ -322,7 +322,7 @@ export struct LibraryPage {
   }
 
   private enter(cc: ClassCourse): void {
-    GlobalState.course = cc;
+    GlobalState.setCourse(cc);
     this.onEnterCourse();
   }
 

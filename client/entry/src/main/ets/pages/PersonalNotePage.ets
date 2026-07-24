@@ -108,57 +108,69 @@ export struct PersonalNotePage {
 
   @Builder
   noteCard(n: Note) {
-    Column({ space: AppTheme.SPACE_M }) {
-      Row() {
-        Text(n.kind === 'md' ? 'AI 笔记' : '手写')
+    Stack({ alignContent: Alignment.TopEnd }) {
+      Column({ space: AppTheme.SPACE_M }) {
+        Row() {
+          Text(n.kind === 'md' ? 'AI 笔记' : '手写')
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(n.kind === 'md' ? AppTheme.PRIMARY : '#4C8DFF')
+            .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+            .borderRadius(999)
+            .backgroundColor(AppTheme.tagBg(n.kind === 'md' ? AppTheme.PRIMARY : '#4C8DFF'))
+          Blank()
+          Text(n.visibility === 'shared' ? '共享' : '私有')
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontColor(n.visibility === 'shared' ? AppTheme.SUCCESS : AppTheme.TEXT_TERTIARY)
+        }
+        .width('100%')
+        .padding({ right: 42 })
+
+        Text(n.title)
+          .fontSize(AppTheme.FONT_SUBTITLE)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppTheme.TEXT_PRIMARY)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.noteExcerpt(n))
           .fontSize(AppTheme.FONT_CAPTION)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(n.kind === 'md' ? AppTheme.PRIMARY : '#4C8DFF')
-          .padding({ left: 10, right: 10, top: 4, bottom: 4 })
-          .borderRadius(999)
-          .backgroundColor(AppTheme.tagBg(n.kind === 'md' ? AppTheme.PRIMARY : '#4C8DFF'))
+          .fontColor(AppTheme.TEXT_SECONDARY)
+          .maxLines(3)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
         Blank()
-        Text(n.visibility === 'shared' ? '共享' : '私有')
-          .fontSize(AppTheme.FONT_CAPTION)
-          .fontColor(n.visibility === 'shared' ? AppTheme.SUCCESS : AppTheme.TEXT_TERTIARY)
-        Text('删除')
-          .fontSize(AppTheme.FONT_CAPTION)
-          .fontColor(AppTheme.DANGER)
-          .onClick(() => {
-            this.deleteNote(n);
-          })
+        Row() {
+          Text(n.updated_at)
+            .fontSize(10)
+            .fontColor(AppTheme.TEXT_TERTIARY)
+          Blank()
+          Text('打开 ›')
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(n.kind === 'md' ? AppTheme.PRIMARY : '#4C8DFF')
+        }
+        .width('100%')
       }
       .width('100%')
+      .height('100%')
+      .padding(AppTheme.SPACE_L)
+      .alignItems(HorizontalAlign.Start)
+      .onClick(() => {
+        this.openNote(n);
+      })
 
-      Text(n.title)
-        .fontSize(AppTheme.FONT_SUBTITLE)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(AppTheme.TEXT_PRIMARY)
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .onClick(() => {
-          this.openNote(n);
-        })
-      Text(this.noteExcerpt(n))
+      Text('删除')
         .fontSize(AppTheme.FONT_CAPTION)
-        .fontColor(AppTheme.TEXT_SECONDARY)
-        .maxLines(3)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .fontColor(AppTheme.DANGER)
+        .margin({ top: AppTheme.SPACE_L, right: AppTheme.SPACE_L })
         .onClick(() => {
-          this.openNote(n);
+          this.deleteNote(n);
         })
-      Blank()
-      Text(n.updated_at)
-        .fontSize(10)
-        .fontColor(AppTheme.TEXT_TERTIARY)
     }
     .width(260)
     .height(190)
-    .padding(AppTheme.SPACE_L)
     .borderRadius(18)
     .backgroundColor(AppTheme.BG_CARD)
     .shadow({ radius: 18, color: 'rgba(0,0,0,0.06)', offsetX: 0, offsetY: 6 })
-    .alignItems(HorizontalAlign.Start)
   }
 
   @Builder

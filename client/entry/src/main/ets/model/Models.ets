@@ -17,6 +17,13 @@ export interface ClassCourse {
   teacher_name?: string;
 }
 
+export interface CourseWorkspaceStats {
+  class_course_id: number;
+  official_lesson_count: number;
+  personal_note_count: number;
+  class_note_count: number;
+}
+
 export interface CourseSession {
   id: number;
   class_course_id: number;
@@ -76,6 +83,16 @@ export interface ChatMessageInfo {
   content: string;
   sources: string; // JSON 数组字符串
   created_at: string;
+}
+
+export interface AiAgentInfo {
+  id: string;
+  name: string;
+  title: string;
+  personality: string;
+  focus: string;
+  catchphrase: string;
+  color: string;
 }
 
 /** 手写笔迹：矢量存储，p=压力(0~1)，预留倾角/速度字段升级笔锋 */

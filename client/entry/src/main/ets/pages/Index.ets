@@ -15,6 +15,7 @@ import { HandwritingNotePage } from './HandwritingNotePage';
 import { ReviewPage } from './ReviewPage';
 import { SettingsPage } from './SettingsPage';
 import { CourseAiPage } from './CourseAiPage';
+import { PracticePage } from './PracticePage';
 
 interface TabItem {
   key: string;
@@ -27,6 +28,7 @@ const TABS: TabItem[] = [
   { key: 'overview', label: '概览', teacherOnly: false, studentOnly: false },
   { key: 'class', label: '课堂', teacherOnly: false, studentOnly: false },
   { key: 'course_ai', label: 'AI', teacherOnly: false, studentOnly: false },
+  { key: 'practice', label: '刷题', teacherOnly: false, studentOnly: true },
   { key: 'notes', label: '笔记', teacherOnly: false, studentOnly: false },
   { key: 'review', label: '审核', teacherOnly: true, studentOnly: false }
 ];
@@ -81,6 +83,9 @@ struct Index {
   }
 
   private normalizeWorkspaceTab(tab: string): string {
+    if (tab === 'practice' && GlobalState.isTeacher()) {
+      return 'overview';
+    }
     if (tab === 'ai') {
       return 'notes';
     }
@@ -113,7 +118,7 @@ struct Index {
     this.stageTimer = setTimeout(() => {
       this.stageTimer = -1;
       CollabManager.stop();
-      GlobalState.course = null;
+      GlobalState.setCourse(null);
       this.stage = 'library';
       this.workspaceClosing = false;
       this.libraryReturnActive = false;
@@ -127,7 +132,7 @@ struct Index {
   private logoutToLogin(): void {
     this.stopStageAnimation();
     CollabManager.stop();
-    GlobalState.course = null;
+    GlobalState.setCourse(null);
     this.showSettings = false;
     this.workspaceClosing = this.stage === 'workspace';
     this.libraryReturnActive = this.stage === 'library' ? false : this.libraryReturnActive;
@@ -217,10 +222,19 @@ struct Index {
   }
 
   private shouldShowWorkbenchSwitcher(): boolean {
-    if (this.currentTab === 'class' || this.currentTab === 'course_ai') {
+    if (this.currentTab === 'overview' || this.currentTab === 'class' || this.currentTab === 'course_ai' ||
+      this.currentTab === 'practice') {
       return true;
     }
     return this.currentTab === 'notes' && this.noteSubPage !== 'ai' && this.noteSubPage !== 'handwriting';
+  }
+
+  private switchToOverviewPage(): void {
+    this.currentTab = 'overview';
+    this.classSubPage = 'list';
+    this.noteSubPage = 'hub';
+    this.noteReadonly = false;
+    GlobalState.updateSnapshot('overview');
   }
 
   private switchToClassPage(): void {
@@ -241,8 +255,14 @@ struct Index {
     GlobalState.updateSnapshot('notes');
   }
 
+  private switchToPracticePage(): void {
+    this.currentTab = 'practice';
+    GlobalState.updateSnapshot('practice');
+  }
+
   private backFromWorkspace(): void {
-    if (this.currentTab === 'class' || this.currentTab === 'course_ai' || this.currentTab === 'notes') {
+    if (this.currentTab === 'class' || this.currentTab === 'course_ai' || this.currentTab === 'practice' ||
+      this.currentTab === 'notes') {
       this.currentTab = 'overview';
       this.classSubPage = 'list';
       this.noteSubPage = 'hub';
@@ -476,12 +496,20 @@ struct Index {
     Row() {
       Blank()
       Row({ space: 4 }) {
+        this.islandButton('overview', '概览', true, (): void => {
+          this.switchToOverviewPage();
+        })
         this.islandButton('class', '课堂', true, (): void => {
           this.switchToClassPage();
         })
         this.islandButton('course_ai', 'AI', true, (): void => {
           this.switchToAiPage();
         })
+        if (!GlobalState.isTeacher()) {
+          this.islandButton('practice', '刷题', true, (): void => {
+            this.switchToPracticePage();
+          })
+        }
         this.islandButton('notes', '笔记', true, (): void => {
           this.switchToNotesPage();
         })
@@ -603,7 +631,10 @@ struct Index {
         }
         Column() {
           if (this.currentTab === 'overview') {
-            OverviewPage()
+            OverviewPage({
+              courseId: GlobalState.courseId(),
+              userId: GlobalState.userId()
+            })
           } else if (this.currentTab === 'class') {
             if (this.classSubPage === 'record') {
               RecordPage()
@@ -612,6 +643,8 @@ struct Index {
             }
           } else if (this.currentTab === 'course_ai') {
             CourseAiPage()
+          } else if (this.currentTab === 'practice' && !GlobalState.isTeacher()) {
+            PracticePage()
           } else if (this.currentTab === 'notes') {
             if (this.noteSubPage === 'class') {
               ClassNotesPage({

@@ -67,10 +67,11 @@ SIS_AUDIO_FORMAT=pcm16k16bit
 | 模块 | 端点 |
 |------|------|
 | auth | `GET /auth/users` |
-| courses | `GET/POST /courses`、`POST /courses/join` |
+| courses | `GET/POST /courses`、`POST /courses/join`、`GET /courses/{id}/stats`（课程工作台真实统计） |
 | sessions | 创建课时、`POST /sessions/{id}/chunks/{seq}` 上传分片转写、`POST .../outline/generate` 生成提纲、`POST .../outline/review` 教师审核发布 |
 | notes | 笔记 CRUD、`POST /notes/{id}/share` 共享+质量评估入库 |
 | chat | 会话管理、`POST /chat/ask` 集合限定 SSE 流式问答 |
+| practice | `POST /practice/generate` 基于课程知识库与用户要求生成选择题 |
 
 ## 客户端
 
@@ -78,7 +79,7 @@ SIS_AUDIO_FORMAT=pcm16k16bit
 
 结构（仿 Notein 两级形态）：登录 → **课程库**（彩色封面网格 + FAB 创建/加入）→ **课程工作台**（左侧窄图标栏：概览/录音/课时/AI 笔记/笔记/审核(教师)/协同）。
 
-页面：概览（统计+邀请码复制+最近课时）/ 录音（圆形录制钮，AudioCapturer 分片上传实时转写，无麦克风自动降级模拟）/ 课时详情三栏 / AI 笔记（Obsidian 式：SSE 流式问答、划词命令、插入/替换/@引用）/ 笔记（MD + 手写悬浮笔盒：5 色 3 档笔宽压感预留）/ 教师审核 / **协同**（NFC 碰一碰写卡入班、局域网 UDP 发现 + TCP 互抓笔记、跨端接续快照，均需真机）。
+页面：概览（统计+邀请码复制+最近课时）/ 录音（圆形录制钮，AudioCapturer 分片上传实时转写，无麦克风自动降级模拟）/ 课时详情三栏 / AI 笔记（Obsidian 式：SSE 流式问答、划词命令、插入/替换/@引用）/ 刷题（按课程知识库、模式、知识点、难度和自由要求调用 AI 生成选择题，并提供答题判定与解析）/ 笔记（MD + 手写悬浮笔盒：5 色 3 档笔宽压感预留）/ 教师审核 / **协同**（NFC 碰一碰写卡入班、局域网 UDP 发现 + TCP 互抓笔记、跨端接续快照，均需真机）。
 
 **联调地址**：`client/.../service/Api.ets` 的 `BASE_URL` 默认 `http://10.0.2.2:8000/api/v1`（模拟器经 QEMU NAT 访问宿主机回环）。若不通改为电脑局域网 IP；真机联调必须用局域网 IP 且服务端 `--host 0.0.0.0`。
 
@@ -90,7 +91,7 @@ cd server
 .venv/Scripts/python -m uvicorn app.main:app --port 8000   # 终端1：启动服务
 .venv/Scripts/python smoke_test.py                          # 终端2：跑测试
 ```
-`smoke_test.py` 覆盖全链路 10 项：健康检查、预置账号、建集合/邀请码加入、分片上传转写、提纲生成、教师发布入库、集合限定问答（SSE+来源）、跨集合隔离、笔记共享质量评估。全部 PASS 即服务端正常。
+`smoke_test.py` 覆盖健康检查、课程创建与加入、录音转写、提纲发布、集合限定问答、知识库 AI 选择题生成、跨集合隔离、笔记共享质量评估和课程统计。全部 PASS 即服务端正常。
 
 ### 手动调试
 浏览器打开 http://127.0.0.1:8000/docs（Swagger UI），可逐个接口点 "Try it out" 调试；SSE 问答接口建议用 curl：`curl -N -X POST .../api/v1/chat/ask -H "Content-Type: application/json" -d @body.json`。

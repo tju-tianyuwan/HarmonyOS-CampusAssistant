@@ -36,6 +36,10 @@ export class GlobalState {
     return GlobalState.course === null ? -1 : GlobalState.course.id;
   }
 
+  static setCourse(course: ClassCourse | null): void {
+    GlobalState.course = course;
+  }
+
   /** 状态变化时调用：刷新迁移快照，供 EntryAbility.onContinue 打包 */
   static updateSnapshot(tab: string): void {
     const snap: ContinueSnapshot = {
@@ -52,7 +56,7 @@ export class GlobalState {
     try {
       const snap: ContinueSnapshot = JSON.parse(json) as ContinueSnapshot;
       GlobalState.user = snap.user;
-      GlobalState.course = snap.course;
+      GlobalState.setCourse(snap.course);
       GlobalState.currentSessionId = snap.sessionId;
       return snap.tab;
     } catch (e) {

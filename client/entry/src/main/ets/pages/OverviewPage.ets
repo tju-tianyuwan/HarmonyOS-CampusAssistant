@@ -1,7 +1,7 @@
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { AppTheme } from '../common/AppTheme';
-import { CourseSession, Note, Outline } from '../model/Models';
+import { CourseWorkspaceStats } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
 
@@ -20,16 +20,6 @@ const AMBER: string = '#FFB84D';
 const CORAL: string = '#FF6F61';
 const VIOLET: string = '#7A63F3';
 
-interface SessionListWrapper {
-  value?: CourseSession[];
-  Value?: CourseSession[];
-}
-
-interface NoteListWrapper {
-  value?: Note[];
-  Value?: Note[];
-}
-
 /**
  * 课程主页：课程信息 + 统计 + 页面入口。
  */
@@ -38,6 +28,8 @@ export struct OverviewPage {
   @StorageLink('currentTab') @Watch('onCurrentTabChanged') currentTab: string = 'overview';
   @StorageLink('classSubPage') classSubPage: string = 'list';
   @StorageLink('noteSubPage') noteSubPage: string = 'hub';
+  @Prop courseId: number = -1;
+  @Prop userId: number = -1;
   @State officialLessonCount: number = 0;
   @State classNoteCount: number = 0;
   @State personalNoteCount: number = 0;
@@ -52,9 +44,11 @@ export struct OverviewPage {
   private statsTimer: number = -1;
   private entriesTimer: number = -1;
   private atlasTimer: number = -1;
+  private statsSyncTimer: number = -1;
+  private loadedCourseId: number = -1;
 
   aboutToAppear(): void {
-    this.load();
+    this.startStatsSync();
     this.startIntro();
     this.startAtlasMotion();
   }
@@ -65,8 +59,33 @@ export struct OverviewPage {
 
   onCurrentTabChanged(): void {
     if (this.currentTab === 'overview') {
-      this.load();
+      this.startStatsSync();
+    } else {
+      this.stopStatsSync();
     }
+  }
+
+  private startStatsSync(): void {
+    this.load();
+    if (this.statsSyncTimer >= 0) {
+      return;
+    }
+    this.statsSyncTimer = setInterval(() => {
+      this.load();
+    }, 3000);
+  }
+
+  private stopStatsSync(): void {
+    if (this.statsSyncTimer >= 0) {
+      clearInterval(this.statsSyncTimer);
+      this.statsSyncTimer = -1;
+    }
+  }
+
+  private resetStats(): void {
+    this.officialLessonCount = 0;
+    this.classNoteCount = 0;
+    this.personalNoteCount = 0;
   }
 
   private startIntro(): void {
@@ -113,6 +132,7 @@ export struct OverviewPage {
       clearInterval(this.atlasTimer);
       this.atlasTimer = -1;
     }
+    this.stopStatsSync();
   }
 
   private courseName(): string {
@@ -130,116 +150,33 @@ export struct OverviewPage {
     return GlobalState.course === null ? '' : GlobalState.course.invite_code;
   }
 
-  private overviewCourseId(): number {
-    const id: number = GlobalState.courseId();
-    if (id > 0) {
-      return id;
-    }
-    return this.inviteCode() === '888888' ? 1 : id;
-  }
-
-  private isDemoCourse(): boolean {
-    return this.overviewCourseId() === 1 || this.inviteCode().trim() === '888888' ||
-      this.courseName().trim() === '数据结构';
-  }
-
-  private shouldApplyCountFallback(): boolean {
-    return this.isDemoCourse();
-  }
-
-  private applyDemoCounts(): void {
-    this.officialLessonCount = 3;
-    this.classNoteCount = 2;
-    this.personalNoteCount = 2;
-  }
-
-  private parseSessions(raw: string): CourseSession[] {
-    const parsed: CourseSession[] | SessionListWrapper = JSON.parse(raw) as CourseSession[] | SessionListWrapper;
-    if (Array.isArray(parsed)) {
-      return parsed as CourseSession[];
-    }
-    const wrapped: SessionListWrapper = parsed as SessionListWrapper;
-    if (wrapped.value !== undefined) {
-      return wrapped.value;
-    }
-    if (wrapped.Value !== undefined) {
-      return wrapped.Value;
-    }
-    return [];
-  }
-
-  private parseNotes(raw: string): Note[] {
-    const parsed: Note[] | NoteListWrapper = JSON.parse(raw) as Note[] | NoteListWrapper;
-    if (Array.isArray(parsed)) {
-      return parsed as Note[];
-    }
-    const wrapped: NoteListWrapper = parsed as NoteListWrapper;
-    if (wrapped.value !== undefined) {
-      return wrapped.value;
-    }
-    if (wrapped.Value !== undefined) {
-      return wrapped.Value;
-    }
-    return [];
-  }
-
   private toast(msg: string): void {
     promptAction.showToast({ message: msg });
   }
 
-  private async patchPublishedOfficialMeta(s: CourseSession): Promise<boolean> {
-    try {
-      const outline: Outline = JSON.parse(
-        await Api.get(`/sessions/${s.id}/outline?user_id=${GlobalState.userId()}`)) as Outline;
-      if (outline.status === 'published') {
-        s.outline_kind = 'official';
-        s.outline_status = 'published';
-        return true;
-      }
-    } catch (e) {
-      return false;
-    }
-    return false;
-  }
-
   private async load(): Promise<void> {
-    try {
-      const all: CourseSession[] = this.parseSessions(
-        await Api.get(`/sessions?class_course_id=${this.overviewCourseId()}&user_id=${GlobalState.userId()}`));
-      let officialCount: number = 0;
-      for (let i = 0; i < all.length; i++) {
-        const s: CourseSession = all[i];
-        if (s.outline_status === 'published') {
-          officialCount++;
-        } else {
-          const published: boolean = await this.patchPublishedOfficialMeta(s);
-          if (published) {
-            officialCount++;
-          }
-        }
-      }
-      this.officialLessonCount = this.shouldApplyCountFallback() && officialCount === 0 ? 3 : officialCount;
-    } catch (e) {
-      if (this.shouldApplyCountFallback()) {
-        this.applyDemoCounts();
-      } else {
-        this.officialLessonCount = 0;
-      }
+    const courseId: number = this.courseId;
+    const userId: number = this.userId;
+    if (courseId <= 0 || userId <= 0) {
+      this.loadedCourseId = -1;
+      this.resetStats();
+      return;
+    }
+    if (this.loadedCourseId !== courseId) {
+      this.loadedCourseId = courseId;
+      this.resetStats();
     }
     try {
-      const notes: Note[] = this.parseNotes(await Api.get(
-        `/notes?class_course_id=${this.overviewCourseId()}&user_id=${GlobalState.userId()}`));
-      const classCount: number = notes.filter((n: Note) => n.visibility === 'shared').length;
-      const personalCount: number = notes.filter((n: Note) => n.owner_id === GlobalState.userId()).length;
-      this.classNoteCount = this.shouldApplyCountFallback() && classCount === 0 ? 2 : classCount;
-      this.personalNoteCount = this.shouldApplyCountFallback() && personalCount === 0 ? 2 : personalCount;
-    } catch (e) {
-      if (this.shouldApplyCountFallback()) {
-        this.applyDemoCounts();
-      } else {
-        this.classNoteCount = 0;
-        this.personalNoteCount = 0;
+      const raw: string = await Api.get(`/courses/${courseId}/stats?user_id=${userId}`);
+      const stats: CourseWorkspaceStats = JSON.parse(raw) as CourseWorkspaceStats;
+      if (this.courseId !== courseId || stats.class_course_id !== courseId) {
+        return;
       }
+      this.officialLessonCount = stats.official_lesson_count;
+      this.classNoteCount = stats.class_note_count;
+      this.personalNoteCount = stats.personal_note_count;
+    } catch (e) {
+      // Keep the last confirmed backend snapshot and retry on the next sync tick.
     }
   }
 
@@ -262,6 +199,11 @@ export struct OverviewPage {
   private openAiPage(): void {
     this.currentTab = 'course_ai';
     GlobalState.updateSnapshot('course_ai');
+  }
+
+  private openPracticePage(): void {
+    this.currentTab = 'practice';
+    GlobalState.updateSnapshot('practice');
   }
 
   private openNotesPage(): void {
@@ -521,9 +463,10 @@ export struct OverviewPage {
   }
 
   @Builder
-  heroStat(num: string, label: string, color: string) {
+  heroStat(kind: string, label: string, color: string) {
     Row({ space: 8 }) {
-      Text(num)
+      Text(kind === 'official' ? `${this.officialLessonCount}` :
+        (kind === 'class' ? `${this.classNoteCount}` : `${this.personalNoteCount}`))
         .fontSize(25)
         .fontWeight(FontWeight.Bold)
         .fontColor('#FFFFFF')
@@ -617,9 +560,9 @@ export struct OverviewPage {
           }
           .alignItems(HorizontalAlign.Start)
           Row({ space: 10 }) {
-            this.heroStat(`${this.officialLessonCount}`, '官方课时', 'rgba(255,184,77,0.46)')
-            this.heroStat(`${this.classNoteCount}`, '班级笔记', 'rgba(5,206,145,0.46)')
-            this.heroStat(`${this.personalNoteCount}`, '个人笔记', 'rgba(63,125,255,0.46)')
+            this.heroStat('official', '官方课时', 'rgba(255,184,77,0.46)')
+            this.heroStat('class', '班级笔记', 'rgba(5,206,145,0.46)')
+            this.heroStat('personal', '个人笔记', 'rgba(63,125,255,0.46)')
           }
           Row({ space: AppTheme.SPACE_M }) {
             this.inviteChip()
@@ -662,6 +605,151 @@ export struct OverviewPage {
     .translate({ x: 0, y: this.pageReady ? 0 : 28 })
     .scale({ x: this.pageReady ? 1 : 0.985, y: this.pageReady ? 1 : 0.985 })
     .animation({ duration: 420, curve: Curve.EaseOut })
+  }
+
+  @Builder
+  practiceChoiceBadge(label: string, color: string, active: boolean) {
+    Text(label)
+      .fontSize(AppTheme.FONT_BODY)
+      .fontWeight(FontWeight.Bold)
+      .fontColor(active ? '#FFFFFF' : AppTheme.TEXT_SECONDARY)
+      .width(42)
+      .height(42)
+      .textAlign(TextAlign.Center)
+      .borderRadius(21)
+      .backgroundColor(active ? color : 'rgba(18,24,24,0.06)')
+      .border({ width: 1, color: active ? color : 'rgba(18,24,24,0.08)' })
+      .shadow({ radius: active ? 14 : 0, color: active ? color : 'transparent', offsetX: 0, offsetY: 6 })
+  }
+
+  @Builder
+  practiceEntryBanner() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .borderRadius(28)
+        .linearGradient({
+          angle: 104,
+          colors: [
+            ['rgba(255,255,255,0.96)', 0],
+            ['#F2FFFA', 0.48],
+            ['#EEF4FF', 1]
+          ]
+        })
+      Column()
+        .width(390)
+        .height(132)
+        .borderRadius(36)
+        .rotate({ angle: -8 })
+        .backgroundColor('rgba(5,206,145,0.10)')
+        .position({ x: -90, y: -54 })
+      Column()
+        .width(340)
+        .height(118)
+        .borderRadius(32)
+        .rotate({ angle: 9 })
+        .backgroundColor('rgba(63,125,255,0.10)')
+        .position({ x: 1130, y: 36 })
+      Row({ space: AppTheme.SPACE_L }) {
+        Stack({ alignContent: Alignment.Center }) {
+          Column()
+            .width(68)
+            .height(68)
+            .borderRadius(22)
+            .rotate({ angle: -7 })
+            .backgroundColor('rgba(255,111,97,0.14)')
+          Text('练')
+            .fontSize(28)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(CORAL)
+        }
+        .width(82)
+        .height(82)
+
+        Column({ space: 6 }) {
+          Row({ space: 8 }) {
+            Text('AI PRACTICE')
+              .fontSize(10)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(AppTheme.INK)
+              .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+              .borderRadius(999)
+              .backgroundColor(AppTheme.PRIMARY)
+            Text('学生专属')
+              .fontSize(10)
+              .fontColor(CORAL)
+          }
+          Row({ space: 12 }) {
+            Text('AI 刷题')
+              .fontSize(30)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(AppTheme.INK)
+            Text('围绕课程重点自动组题，作答后即时查看解析')
+              .fontSize(AppTheme.FONT_BODY)
+              .fontColor(AppTheme.TEXT_SECONDARY)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        Row({ space: 10 }) {
+          this.practiceChoiceBadge('A', CORAL, true)
+          this.practiceChoiceBadge('B', BLUE, false)
+          this.practiceChoiceBadge('C', AppTheme.PRIMARY, false)
+        }
+
+        Row({ space: 8 }) {
+          Text('开始刷题')
+            .fontSize(AppTheme.FONT_BODY)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+          Text('→')
+            .fontSize(AppTheme.FONT_BODY)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#FFFFFF')
+        }
+        .height(44)
+        .padding({ left: 18, right: 18 })
+        .borderRadius(22)
+        .backgroundColor(AppTheme.INK)
+      }
+      .width('100%')
+      .height('100%')
+      .padding({ left: 26, right: 24 })
+      .alignItems(VerticalAlign.Center)
+    }
+    .width('100%')
+    .height(122)
+    .clip(true)
+    .borderRadius(28)
+    .border({ width: 1.2, color: GLASS_BORDER })
+    .shadow({
+      radius: this.pressedEntry === 'practiceBanner' ? 16 : 28,
+      color: this.pressedEntry === 'practiceBanner' ? SHADOW_LOW : 'rgba(63,125,255,0.14)',
+      offsetX: 0,
+      offsetY: this.pressedEntry === 'practiceBanner' ? 6 : 12
+    })
+    .opacity(this.entriesReady ? 1 : 0)
+    .translate({ x: 0, y: this.entriesReady ? (this.pressedEntry === 'practiceBanner' ? 3 : 0) : 24 })
+    .scale({
+      x: this.pressedEntry === 'practiceBanner' ? 0.986 : (this.entriesReady ? 1 : 0.99),
+      y: this.pressedEntry === 'practiceBanner' ? 0.986 : (this.entriesReady ? 1 : 0.99)
+    })
+    .animation({ duration: this.pressedEntry === 'practiceBanner' ? 90 : 360, curve: Curve.EaseOut })
+    .onTouch((event: TouchEvent) => {
+      if (event.type === TouchType.Down) {
+        this.pressedEntry = 'practiceBanner';
+      } else if (event.type === TouchType.Up) {
+        this.pressedEntry = '';
+      }
+    })
+    .onClick(() => {
+      this.pressedEntry = '';
+      this.openPracticePage();
+    })
   }
 
   @Builder
@@ -1016,6 +1104,10 @@ export struct OverviewPage {
 
       Column({ space: AppTheme.SPACE_L }) {
         this.heroPanel()
+
+        if (!GlobalState.isTeacher()) {
+          this.practiceEntryBanner()
+        }
 
         Row({ space: AppTheme.SPACE_L }) {
           this.entryCard('class', '课程', '课堂记录、官方课时与录音成果', AMBER, (): void => {

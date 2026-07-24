@@ -1,11 +1,14 @@
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
+import { AiAgentInfo } from '../model/Models';
 
 /** SSE 流式回调 */
 export interface StreamCallbacks {
   onSources: (sources: string[]) => void;
   onWarning: (msg: string) => void;
   onDelta: (delta: string) => void;
+  onAgent?: (agent: AiAgentInfo) => void;
+  onAgentDone?: (agentId: string) => void;
   onDone: () => void;
   onError: (msg: string) => void;
 }
@@ -28,6 +31,10 @@ export class Api {
       body === undefined ? undefined : JSON.stringify(body));
   }
 
+  static async postLong(path: string, body: object): Promise<string> {
+    return Api.request(path, http.RequestMethod.POST, JSON.stringify(body), 120000);
+  }
+
   static async put(path: string, body: object): Promise<string> {
     return Api.request(path, http.RequestMethod.PUT, JSON.stringify(body));
   }
@@ -37,14 +44,14 @@ export class Api {
   }
 
   private static async request(path: string, method: http.RequestMethod,
-    body: string | undefined): Promise<string> {
+    body: string | undefined, readTimeout: number = Api.TIMEOUT_MS): Promise<string> {
     const client: http.HttpRequest = http.createHttp();
     try {
       const options: http.HttpRequestOptions = {
         method: method,
         header: { 'Content-Type': 'application/json' } as Record<string, string>,
         connectTimeout: Api.TIMEOUT_MS,
-        readTimeout: Api.TIMEOUT_MS,
+        readTimeout: readTimeout,
         expectDataType: http.HttpDataType.STRING,
         extraData: body
       };
@@ -92,7 +99,7 @@ export class Api {
    * 基于 requestInStream 增量接收，utf-8 流式解码防止多字节字符截断。
    */
   static streamAsk(chatSessionId: number, question: string, contextNote: string,
-    cb: StreamCallbacks): void {
+    cb: StreamCallbacks, mode: string = 'single'): void {
     const client: http.HttpRequest = http.createHttp();
     const decoder: util.TextDecoder = util.TextDecoder.create('utf-8');
     let buffer: string = '';
@@ -144,6 +151,22 @@ export class Api {
         } catch (e) {
           cb.onWarning(data);
         }
+      } else if (currentEvent === 'agent') {
+        if (cb.onAgent !== undefined) {
+          try {
+            cb.onAgent(JSON.parse(data) as AiAgentInfo);
+          } catch (e) {
+            // 无效角色事件忽略，后续 delta 仍可按普通助手消息展示
+          }
+        }
+      } else if (currentEvent === 'agent_done') {
+        if (cb.onAgentDone !== undefined) {
+          try {
+            cb.onAgentDone(JSON.parse(data) as string);
+          } catch (e) {
+            cb.onAgentDone(data);
+          }
+        }
       } else if (currentEvent === 'done') {
         finish(null);
       } else {
@@ -174,12 +197,14 @@ export class Api {
       chat_session_id: number;
       question: string;
       context_note: string;
+      mode: string;
     }
 
     const body: AskBody = {
       chat_session_id: chatSessionId,
       question: question,
-      context_note: contextNote
+      context_note: contextNote,
+      mode: mode
     };
     const options: http.HttpRequestOptions = {
       method: http.RequestMethod.POST,

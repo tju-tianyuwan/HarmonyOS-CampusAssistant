@@ -1,12 +1,13 @@
 import random
 import string
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from ..db import get_db
-from ..models import ClassCourse, Membership, User
+from ..models import ClassCourse, CourseSession, Membership, Note, Outline, User
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
@@ -22,6 +23,13 @@ class JoinCourse(BaseModel):
     invite_code: str
 
 
+class CourseWorkspaceStats(BaseModel):
+    class_course_id: int
+    official_lesson_count: int
+    personal_note_count: int
+    class_note_count: int
+
+
 @router.get("")
 def list_courses(user_id: int, db: Session = Depends(get_db)):
     """用户已加入的课程集合"""
@@ -34,6 +42,58 @@ def list_courses(user_id: int, db: Session = Depends(get_db)):
         teacher = db.get(User, c.teacher_id)
         result.append({**c.model_dump(), "teacher_name": teacher.name if teacher else ""})
     return result
+
+
+@router.get("/{class_course_id}/stats", response_model=CourseWorkspaceStats)
+def course_workspace_stats(
+    class_course_id: int,
+    user_id: int,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """课程工作台统计；所有数据严格限定在当前课程数据域。"""
+    response.headers["Cache-Control"] = "no-store"
+    cc = db.get(ClassCourse, class_course_id)
+    if not cc:
+        raise HTTPException(404, "课程不存在")
+    membership = db.exec(
+        select(Membership).where(
+            Membership.class_course_id == class_course_id,
+            Membership.user_id == user_id,
+        )
+    ).first()
+    if not membership:
+        raise HTTPException(403, "尚未加入该课程")
+
+    official_lesson_count = db.exec(
+        select(func.count(func.distinct(CourseSession.id)))
+        .join(Outline, Outline.session_id == CourseSession.id)
+        .where(
+            CourseSession.class_course_id == class_course_id,
+            Outline.class_course_id == class_course_id,
+            Outline.owner_id == -1,
+            Outline.status == "published",
+        )
+    ).one()
+    personal_note_count = db.exec(
+        select(func.count(Note.id)).where(
+            Note.class_course_id == class_course_id,
+            Note.owner_id == user_id,
+        )
+    ).one()
+    class_note_count = db.exec(
+        select(func.count(Note.id)).where(
+            Note.class_course_id == class_course_id,
+            Note.visibility == "shared",
+        )
+    ).one()
+
+    return CourseWorkspaceStats(
+        class_course_id=class_course_id,
+        official_lesson_count=int(official_lesson_count or 0),
+        personal_note_count=int(personal_note_count or 0),
+        class_note_count=int(class_note_count or 0),
+    )
 
 
 @router.post("")

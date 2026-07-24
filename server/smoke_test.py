@@ -8,13 +8,14 @@
 教师发布入库 → 集合限定问答（SSE+引用来源）→ 跨集合隔离 → 笔记共享质量评估。
 """
 import json
+import os
 import sys
 
 import httpx
 
 sys.stdout.reconfigure(encoding="utf-8")  # Windows 控制台默认 GBK，强制 UTF-8 防中文乱码
 
-BASE = "http://127.0.0.1:8000"
+BASE = os.getenv("BASE_URL", "http://127.0.0.1:8000")
 API = BASE + "/api/v1"
 
 passed: list[str] = []
@@ -77,11 +78,12 @@ def main() -> None:
         for seq in range(3):
             c.post(API + f"/sessions/{sid}/chunks/{seq}", files={"file": ("chunk.pcm", b"\x00" * 16)})
         tr = c.get(API + f"/sessions/{sid}/transcript").json()
-        check("音频分片上传→ASR转写", len(tr) == 3, f"{len(tr)} 段，首段: {tr[0]['text'][:18]}…")
+        first_transcript = f"首段: {tr[0]['text'][:18]}…" if tr else "无转写结果"
+        check("音频分片上传→ASR转写", len(tr) == 3, f"{len(tr)} 段，{first_transcript}")
         c.post(API + f"/sessions/{sid}/finish")
 
         o = c.post(API + f"/sessions/{sid}/outline/generate").json()
-        check("AI 生成 Markdown 提纲", o.get("status") == "draft" and bool(o.get("markdown")),
+        check("AI 生成 Markdown 提纲", o.get("status") == "generated" and bool(o.get("markdown")),
               f"{len(o.get('markdown', ''))} 字符")
 
         o2 = c.post(API + f"/sessions/{sid}/outline/review", json={
@@ -99,6 +101,24 @@ def main() -> None:
         check("集合限定问答(流式+来源)", bool(sources) and bool(text),
               f"来源={sources} 回答={text[:24]}…")
 
+        practice = c.post(API + "/practice/generate", json={
+            "class_course_id": ccid,
+            "user_id": student["id"],
+            "count": 5,
+            "mode": "智能组卷",
+            "topic": "二叉树",
+            "difficulty": "适中",
+            "requirements": "侧重遍历和容易混淆的概念",
+        }).json()
+        generated_questions = practice.get("questions", [])
+        check(
+            "知识库 AI 选择题生成",
+            len(generated_questions) == 5
+            and all(len(question.get("options", [])) == 4 for question in generated_questions)
+            and bool(practice.get("knowledge_sources")),
+            f"题目={len(generated_questions)} 来源={practice.get('knowledge_sources', [])}",
+        )
+
         cc_b = c.post(API + "/courses", json={
             "name": "隔离对照课", "class_name": "测试班", "teacher_id": teacher["id"],
         }).json()
@@ -109,7 +129,7 @@ def main() -> None:
             "chat_session_id": ch_b["id"], "question": "二叉树的中序遍历顺序是什么？",
         }) as r:
             src_b, text_b = sse_collect(r)
-        check("知识库跨集合隔离", "未找到" in text_b and not src_b, f"对照集合回答={text_b}")
+        check("知识库跨集合隔离", "知识库中暂时未包含" in text_b and not src_b, f"对照集合回答={text_b}")
 
         n = c.post(API + "/notes", json={
             "class_course_id": ccid, "owner_id": student["id"], "title": "遍历总结", "kind": "md",
@@ -118,6 +138,15 @@ def main() -> None:
         n2 = c.post(API + f"/notes/{n['id']}/share").json()
         check("笔记共享→LLM质量评估", n2.get("quality_status") in ("accepted", "rejected"),
               f"结果={n2.get('quality_status')} 得分={n2.get('quality_score')}")
+
+        stats = c.get(API + f"/courses/{ccid}/stats", params={"user_id": student["id"]}).json()
+        check(
+            "课程工作台真实统计",
+            stats.get("official_lesson_count") == 1
+            and stats.get("personal_note_count") == 1
+            and stats.get("class_note_count") == 1,
+            json.dumps(stats, ensure_ascii=False),
+        )
 
     print(f"\n共 {len(passed)} 通过, {len(failed)} 失败" + (f": {failed}" if failed else ""))
     sys.exit(1 if failed else 0)
