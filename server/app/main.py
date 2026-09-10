@@ -1,21 +1,28 @@
 import os
+import asyncio
+from contextlib import suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
 from .config import settings
-from .db import engine, init_db
+from .db import engine, init_db, write_lock
 from .models import ClassCourse, CourseSession, Membership, Note, TranscriptSegment, User
-from .routers import analytics, auth, chat, courses, notes, practice, sessions
+from .routers import analytics, auth, chat, courses, notes, practice, sessions, knowledge, meetings
+from .services.meetings import worker
 from .services.asr import is_asr_configured
+from .services import document_jobs, rag
+from .services.locking import async_process_lock
+import logging
 
 app = FastAPI(title="智慧伴学 Demo API")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
-for r in (auth.router, courses.router, sessions.router, notes.router, chat.router, analytics.router, practice.router):
+for r in (auth.router, courses.router, sessions.router, notes.router, chat.router, analytics.router, practice.router,
+          knowledge.router, meetings.router):
     app.include_router(r, prefix="/api/v1")
 
 
@@ -26,6 +33,7 @@ def health():
         "asr_provider": settings.asr_provider,
         "asr_configured": is_asr_configured(),
         "llm_configured": bool(settings.llm_api_key),
+        "ocr_provider": settings.document_ocr_provider,
     }
 
 
@@ -65,7 +73,39 @@ def seed():
 
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     os.makedirs(settings.data_dir, exist_ok=True)
-    init_db()
-    seed()
+    if int(os.environ.get("CAMPUS_WORKERS", "1")) > 1 and rag.configured() and not settings.chroma_host:
+        raise RuntimeError("Multiple API workers with embeddings require CHROMA_HOST (shared Chroma server)")
+    with write_lock:
+        init_db()
+        seed()
+    app.state.tasks = [asyncio.create_task(leader("meetings", worker)),
+                       asyncio.create_task(leader("imports", document_jobs.worker)),
+                       asyncio.create_task(leader("maintenance", maintenance))]
+
+
+async def leader(name, run):
+    async with async_process_lock("leader-" + name):
+        await run()
+
+
+async def maintenance():
+    while True:
+        try:
+            await asyncio.to_thread(document_jobs.cleanup)
+            if settings.chroma_host or os.path.isdir(os.path.join(settings.data_dir, "chroma")):
+                def collect():
+                    with Session(engine) as db: rag.cleanup(db)
+                await asyncio.to_thread(collect)
+        except Exception:
+            logging.getLogger(__name__).exception("Index maintenance failed; retrying later")
+        await asyncio.sleep(max(60, settings.rag_cleanup_seconds))
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    tasks = getattr(app.state, "tasks", [])
+    for task in tasks: task.cancel()
+    for task in tasks:
+        with suppress(asyncio.CancelledError): await task

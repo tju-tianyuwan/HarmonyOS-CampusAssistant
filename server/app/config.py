@@ -13,7 +13,9 @@ class Settings(BaseSettings):
     embed_model: str = ""
     rag_max_distance: float = 1.0
 
-    asr_provider: str = "mock"
+    asr_provider: str = "local"
+    asr_local_model: str = "small"
+    asr_local_threads: int = 4
     asr_base_url: str = "https://api.openai.com/v1"
     asr_api_key: str = ""
     asr_model: str = "whisper-1"
@@ -39,6 +41,30 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./smartstudy.db"
     data_dir: str = "./data"
+
+    auth_session_hours: int = 168
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_ssl: bool = False
+    smtp_starttls: bool = True
+    document_max_bytes: int = 50 * 1024 * 1024
+    document_max_pages: int = 100
+    llm_vision_model: str = ""
+    document_ocr_provider: str = "local"
+    document_job_workers: int = 2
+    document_queue_limit: int = 20
+    document_job_retention_days: int = 7
+    chroma_host: str = ""
+    chroma_port: int = 8002
+    chroma_ssl: bool = False
+    rag_cleanup_seconds: int = 3600
+    meeting_workers: int = 4
+    embed_dimensions: int = 0
+    meeting_idle_seconds: int = 30
+    meeting_minutes_limit: int = 24000
 
 
 settings = Settings()

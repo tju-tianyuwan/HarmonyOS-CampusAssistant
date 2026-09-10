@@ -56,13 +56,6 @@ const COURSE_VISUALS: CourseVisual[] = [
   }
 ];
 
-const DEMO_COURSES: DisplayCourse[] = [
-  { id: -1, name: '数据结构', class_name: '计科2301班', teacher_name: '王老师', invite_code: '230101', real: false },
-  { id: -2, name: '高等数学', class_name: '计科2301班', teacher_name: '王老师', invite_code: '230102', real: false },
-  { id: -3, name: '大学英语', class_name: '计科2301班', teacher_name: '王老师', invite_code: '230103', real: false },
-  { id: -4, name: '计算机网络', class_name: '计科2301班', teacher_name: '王老师', invite_code: '230104', real: false },
-  { id: -5, name: '人工智能导论', class_name: '计科2301班', teacher_name: '王老师', invite_code: '230105', real: false }
-];
 
 /**
  * 课程库（登录后的用户主页）：
@@ -70,6 +63,7 @@ const DEMO_COURSES: DisplayCourse[] = [
  */
 @Component
 export struct LibraryPage {
+  @State compact: boolean = false;
   onEnterCourse: () => void = () => {
   };
   onLogout: () => void = () => {
@@ -232,7 +226,7 @@ export struct LibraryPage {
 
   private displayCourses(): DisplayCourse[] {
     if (this.courses.length === 0) {
-      return DEMO_COURSES;
+      return [];
     }
     const list: DisplayCourse[] = [];
     for (let i = 0; i < this.courses.length; i++) {
@@ -383,6 +377,16 @@ export struct LibraryPage {
 
   @Builder
   topArea() {
+    if (this.compact) {
+      Row({ space: 12 }) {
+        Column({ space: 4 }) {
+          Text(this.userName()).fontSize(20).fontWeight(FontWeight.Bold).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(`${this.courses.length} 门课程`).fontSize(13).fontColor(AppTheme.TEXT_SECONDARY)
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Button('个人设置').fontColor(AppTheme.PRIMARY_DEEP).backgroundColor(AppTheme.PRIMARY_LIGHT)
+          .onClick(() => { this.onOpenSettings(); })
+      }.width('100%').height(64)
+    } else {
     Row({ space: AppTheme.SPACE_L }) {
       Column({ space: AppTheme.SPACE_XS }) {
         Text(`${this.greeting}，${this.userName()}`)
@@ -427,6 +431,7 @@ export struct LibraryPage {
       .shadow({ radius: 32, color: SHADOW_LAYER_BACK, offsetX: 0, offsetY: 12 })
     }
     .width('100%')
+    }
   }
 
   @Builder
@@ -628,6 +633,7 @@ export struct LibraryPage {
     }
     .layoutWeight(1)
     .scrollBar(BarState.Off)
+    .align(Alignment.TopStart)
   }
 
   @Builder
@@ -796,7 +802,7 @@ export struct LibraryPage {
             this.closeForm();
           })
       }
-      .width(392)
+      .width('92%').constraintSize({ maxWidth: 392 })
       .padding(AppTheme.SPACE_XL)
       .borderRadius(26)
       .backdropBlur(30)
@@ -960,20 +966,26 @@ export struct LibraryPage {
             .border({ width: 1.2, color: GLASS_BORDER_LIGHT })
         }
         .width('100%')
-        .padding({ left: AppTheme.SPACE_S, right: 110 })
+        .padding({ left: AppTheme.SPACE_S, right: this.compact ? 0 : 110 })
 
         Column() {
+          if (this.courses.length === 0) {
+            Text('暂无课程').fontSize(18).fontColor(AppTheme.TEXT_SECONDARY).padding(24)
+          }
           this.courseGrid()
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ right: 72 })
+        .padding({ right: this.compact ? 0 : 72, bottom: this.compact ? 60 : 0 })
       }
       .width('100%')
       .height('100%')
-      .padding(AppTheme.SPACE_XXL)
+      .padding(this.compact ? 16 : AppTheme.SPACE_XXL)
 
-      this.fab()
+      if (this.compact) {
+        Button(GlobalState.isTeacher() ? '新建课程' : '加入课程').height(44).backgroundColor(AppTheme.PRIMARY)
+          .margin(16).onClick(() => { this.showForm = true; this.formOpenProgress = true; })
+      } else { this.fab() }
 
       if (this.showForm) {
         this.formOverlay()
@@ -982,5 +994,6 @@ export struct LibraryPage {
     .width('100%')
     .height('100%')
     .backgroundColor(BG_BASE)
+    .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 900 || Number(newArea.height) < 500; })
   }
 }

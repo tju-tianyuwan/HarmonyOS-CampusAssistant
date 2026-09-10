@@ -105,3 +105,113 @@ class KeywordStat(SQLModel, table=True):
     keyword: str = Field(index=True)
     count: int = 0
     last_seen_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Account(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", unique=True)
+    login_key: str = Field(unique=True, index=True)
+    account_type: str
+    password_hash: str
+    email: str = ""
+    school_name: str = ""
+    student_number: str = ""
+    verification_status: str = "pending"
+
+
+class AuthSession(SQLModel, table=True):
+    token_hash: str = Field(primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    expires_at: datetime
+
+
+class EmailCode(SQLModel, table=True):
+    email: str = Field(primary_key=True)
+    code_hash: str
+    expires_at: datetime
+    sent_at: datetime = Field(default_factory=datetime.utcnow)
+    attempts: int = 0
+
+
+class AuthRateLimit(SQLModel, table=True):
+    key: str = Field(primary_key=True)
+    count: int = 0
+    expires_at: datetime
+
+
+class AccountCode(SQLModel, table=True):
+    key: str = Field(primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    email: str
+    purpose: str
+    code_hash: str
+    credential_version: str
+    expires_at: datetime
+    sent_at: datetime = Field(default_factory=datetime.utcnow)
+    attempts: int = 0
+
+
+class PersonalWorkspace(SQLModel, table=True):
+    user_id: int = Field(primary_key=True, foreign_key="user.id")
+    class_course_id: int = Field(foreign_key="classcourse.id", unique=True)
+
+
+class KnowledgeDocument(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    class_course_id: int = Field(index=True)
+    source: str
+    content: str
+    kind: str = "manual"
+    version: str
+    embedding_profile: str = ""
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class DocumentJob(SQLModel, table=True):
+    id: str = Field(primary_key=True)
+    class_course_id: int = Field(index=True)
+    user_id: int = Field(index=True)
+    filename: str
+    status: str = Field(default="queued", index=True)
+    progress: int = 0
+    error: str = ""
+    chunks: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class MeetingRoom(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    class_course_id: int = Field(foreign_key="classcourse.id", index=True)
+    creator_id: int = Field(foreign_key="user.id")
+    name: str
+    participant_limit: int = 20
+    enabled: bool = True
+    status: str = "active"
+    minutes: str = ""
+    processed_message_id: int = 0
+    buffer_seconds: int = 2
+    last_activity: datetime = Field(default_factory=datetime.utcnow)
+    idle_prompted: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class MeetingMember(SQLModel, table=True):
+    room_id: int = Field(primary_key=True, foreign_key="meetingroom.id")
+    user_id: int = Field(primary_key=True, foreign_key="user.id")
+
+
+class MeetingExclusion(SQLModel, table=True):
+    room_id: int = Field(primary_key=True, foreign_key="meetingroom.id")
+    user_id: int = Field(primary_key=True, foreign_key="user.id")
+
+
+class MeetingMessage(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    room_id: int = Field(foreign_key="meetingroom.id", index=True)
+    sender_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    sender_name: str
+    role: str = "user"
+    content: str
+    sources: str = "[]"
+    created_at: datetime = Field(default_factory=datetime.utcnow)

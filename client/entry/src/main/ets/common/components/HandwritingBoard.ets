@@ -19,7 +19,7 @@ const PEN_WIDTHS: number[] = [2, 4, 7];
 /**
  * 手写画板（Notein 风）：全幅画布 + 底部居中悬浮笔盒
  * （笔/橡皮 · 色板 · 笔宽圆点 · 撤销/清空）。
- * 矢量笔迹存储，压力映射粗细；真机压感接入点 getPressure()。
+ * 矢量笔迹存储，触控笔压力映射粗细，手指和鼠标使用固定宽度。
  */
 @Component
 export struct HandwritingBoard {
@@ -36,15 +36,22 @@ export struct HandwritingBoard {
   @State strokeCount: number = 0;
   private strokes: Stroke[] = [];
   private currentStroke: Stroke | null = null;
+  private pointerId: number = -1;
+  private pointerIsPen: boolean = false;
   private settings: RenderingContextSettings = new RenderingContextSettings(true);
   private ctx: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.settings);
   private readonly eraserWidth: number = 26;
+  private documentWidth: number = 0;
+  private documentHeight: number = 0;
+  private drawingScale: number = 1;
 
   aboutToAppear(): void {
     if (this.initialJson.trim() !== '') {
       try {
         const doc: HandwritingDoc = JSON.parse(this.initialJson) as HandwritingDoc;
         this.strokes = doc.strokes;
+        this.documentWidth = Number.isFinite(doc.width) ? doc.width! : 0;
+        this.documentHeight = Number.isFinite(doc.height) ? doc.height! : 0;
         this.strokeCount = this.strokes.length;
       } catch (e) {
         this.strokes = [];
@@ -52,16 +59,13 @@ export struct HandwritingBoard {
     }
   }
 
-  /**
-   * 压力获取挂载点：真机 M-Pencil 支持后改读触摸事件压力值；
-   * 模拟器与鼠标恒定 1.0。数据结构已按 0~1 压力存储。
-   */
-  private getPressure(): number {
-    return 1.0;
+  private getPressure(event: TouchEvent): number {
+    if (event.sourceTool !== SourceTool.Pen || !Number.isFinite(event.pressure)) { return 1; }
+    return Math.max(0.05, Math.min(1, event.pressure));
   }
 
   private emit(): void {
-    const doc: HandwritingDoc = { strokes: this.strokes };
+    const doc: HandwritingDoc = { strokes: this.strokes, width: this.documentWidth, height: this.documentHeight };
     this.onStrokesChanged(JSON.stringify(doc));
   }
 
@@ -70,17 +74,40 @@ export struct HandwritingBoard {
     this.ctx.lineCap = 'round';
     this.ctx.lineJoin = 'round';
     this.ctx.strokeStyle = stroke.eraser ? '#FFFFFF' : stroke.color;
-    this.ctx.lineWidth = stroke.width * ((from.p + to.p) / 2);
+    this.ctx.lineWidth = stroke.width * (stroke.eraser ? 1 : Math.max(0.05, (from.p + to.p) / 2));
     this.ctx.moveTo(from.x, from.y);
     this.ctx.lineTo(to.x, to.y);
     this.ctx.stroke();
   }
 
+  private drawDot(point: StrokePoint, stroke: Stroke): void {
+    this.ctx.beginPath();
+    this.ctx.fillStyle = stroke.eraser ? '#FFFFFF' : stroke.color;
+    this.ctx.arc(point.x, point.y, stroke.width * (stroke.eraser ? 1 : Math.max(0.05, point.p)) / 2, 0, Math.PI * 2);
+    this.ctx.fill();
+  }
+
   private redraw(): void {
+    if (this.ctx.width <= 0 || this.ctx.height <= 0) { return; }
+    if (this.documentWidth <= 0 || this.documentHeight <= 0) {
+      let maxX: number = 0;
+      let maxY: number = 0;
+      for (const stroke of this.strokes) {
+        for (const point of stroke.points) { maxX = Math.max(maxX, point.x + stroke.width); maxY = Math.max(maxY, point.y + stroke.width); }
+      }
+      this.documentWidth = Math.max(this.ctx.width, maxX + 16);
+      this.documentHeight = Math.max(this.ctx.height - 80, maxY + 16);
+    }
+    this.drawingScale = Math.min(this.ctx.width / this.documentWidth, Math.max(1, this.ctx.height - 80) / this.documentHeight);
+    this.ctx.resetTransform();
     this.ctx.clearRect(0, 0, this.ctx.width, this.ctx.height);
-    this.ctx.fillStyle = '#FFFFFF';
+    this.ctx.fillStyle = '#F2F5F4';
     this.ctx.fillRect(0, 0, this.ctx.width, this.ctx.height);
+    this.ctx.scale(this.drawingScale, this.drawingScale);
+    this.ctx.fillStyle = '#FFFFFF';
+    this.ctx.fillRect(0, 0, this.documentWidth, this.documentHeight);
     for (const s of this.strokes) {
+      if (s.points.length === 1) { this.drawDot(s.points[0], s); }
       for (let i = 1; i < s.points.length; i++) {
         this.drawSegment(s.points[i - 1], s.points[i], s);
       }
@@ -88,34 +115,49 @@ export struct HandwritingBoard {
   }
 
   private handleTouch(event: TouchEvent): void {
-    if (event.touches.length === 0 && event.type !== TouchType.Up) {
-      return;
+    const isPen = event.sourceTool === SourceTool.Pen;
+    if (this.currentStroke !== null && this.pointerIsPen && !isPen) { return; }
+    if (event.type === TouchType.Cancel) {
+      this.currentStroke = null; this.pointerId = -1; this.redraw(); return;
     }
     if (event.type === TouchType.Down) {
-      const t: TouchObject = event.touches[0];
-      const p: StrokePoint = { x: t.x, y: t.y, p: this.getPressure() };
+      if (this.currentStroke !== null) {
+        if (!isPen || this.pointerIsPen) { return; }
+        this.currentStroke = null; this.redraw();
+      }
+      const t = event.changedTouches[0];
+      if (t === undefined) { return; }
+      this.pointerId = t.id;
+      this.pointerIsPen = isPen;
+      const p: StrokePoint = { x: t.x / this.drawingScale, y: t.y / this.drawingScale, p: this.getPressure(event) };
+      if (p.x > this.documentWidth || p.y > this.documentHeight) { return; }
       const isEraser: boolean = this.tool === 'eraser';
       this.currentStroke = {
         points: [p],
-        width: isEraser ? this.eraserWidth : this.penWidth,
+        width: (isEraser ? this.eraserWidth : this.penWidth) / this.drawingScale,
         color: this.penColor,
         eraser: isEraser
       };
+      this.drawDot(p, this.currentStroke);
     } else if (event.type === TouchType.Move && this.currentStroke !== null) {
-      const t: TouchObject = event.touches[0];
-      const p: StrokePoint = { x: t.x, y: t.y, p: this.getPressure() };
+      const t = event.changedTouches.find((touch: TouchObject) => touch.id === this.pointerId);
+      if (t === undefined) { return; }
+      const p: StrokePoint = { x: Math.min(this.documentWidth, Math.max(0, t.x / this.drawingScale)),
+        y: Math.min(this.documentHeight, Math.max(0, t.y / this.drawingScale)), p: this.getPressure(event) };
       const pts: StrokePoint[] = this.currentStroke.points;
       pts.push(p);
       if (pts.length >= 2) {
         this.drawSegment(pts[pts.length - 2], pts[pts.length - 1], this.currentStroke);
       }
     } else if (event.type === TouchType.Up && this.currentStroke !== null) {
-      if (this.currentStroke.points.length > 1) {
+      if (!event.changedTouches.some((touch: TouchObject) => touch.id === this.pointerId)) { return; }
+      if (this.currentStroke.points.length > 0) {
         this.strokes.push(this.currentStroke);
         this.strokeCount = this.strokes.length;
         this.emit();
       }
       this.currentStroke = null;
+      this.pointerId = -1;
     }
   }
 
@@ -139,6 +181,7 @@ export struct HandwritingBoard {
         .onReady(() => {
           this.redraw();
         })
+        .onAreaChange(() => { this.currentStroke = null; this.pointerId = -1; this.redraw(); })
         .onTouch((event: TouchEvent) => {
           if (!this.readOnly) {
             this.handleTouch(event);
@@ -147,6 +190,7 @@ export struct HandwritingBoard {
 
       // 悬浮笔盒
       if (!this.readOnly) {
+        Scroll() {
         Row({ space: AppTheme.SPACE_S }) {
           Text('✒️')
             .fontSize(18)
@@ -243,8 +287,9 @@ export struct HandwritingBoard {
         .borderRadius(999)
         .backgroundColor(AppTheme.BG_CARD)
         .shadow({ radius: 26, color: 'rgba(17,17,17,0.12)', offsetX: 0, offsetY: 5 })
-        .margin({ bottom: AppTheme.SPACE_L })
         .alignItems(VerticalAlign.Center)
+        }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+          .constraintSize({ maxWidth: '96%' }).height(68).margin({ bottom: AppTheme.SPACE_L })
       }
     }
     .width('100%')

@@ -2,6 +2,8 @@ import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { GlobalState } from '../service/GlobalState';
+import { transferService } from '../service/collab/TransferService';
+import { deviceInfo } from '@kit.BasicServicesKit';
 
 const DOMAIN: number = 0x0000;
 const TAG: string = 'EntryAbility';
@@ -27,12 +29,12 @@ export default class EntryAbility extends UIAbility {
 
   /** 源端：打包当前学习状态（设置中关闭跨端接续时拒绝迁移） */
   onContinue(wantParam: Record<string, Object>): AbilityConstant.OnContinueResult {
-    if (!GlobalState.continuationEnabled) {
+    if (!GlobalState.continuationEnabled || AppStorage.get<boolean>('recordingActive') === true) {
       return AbilityConstant.OnContinueResult.REJECT;
     }
     const snapshot: string | undefined = AppStorage.get<string>('continueSnapshot');
     wantParam['smartstudy_state'] = snapshot ?? '';
-    hilog.info(DOMAIN, TAG, 'onContinue snapshot=%{public}s', snapshot ?? 'empty');
+    hilog.info(DOMAIN, TAG, 'onContinue prepared');
     return AbilityConstant.OnContinueResult.AGREE;
   }
 
@@ -60,6 +62,16 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
+    windowStage.getMainWindow().then((mainWindow: window.Window) => {
+      if (deviceInfo.deviceType === 'phone') {
+        mainWindow.setPreferredOrientation(window.Orientation.AUTO_ROTATION).catch(() => {});
+      }
+      mainWindow.on('keyboardHeightChange', (height: number) => {
+        AppStorage.setOrCreate<number>('keyboardHeight', height);
+      });
+      transferService.configure(this.context, mainWindow.getWindowProperties().id);
+      transferService.startSharing();
+    });
     hilog.info(DOMAIN, TAG, 'Ability onWindowStageCreate');
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
@@ -71,14 +83,17 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageDestroy(): void {
+    transferService.stopSharing();
     hilog.info(DOMAIN, TAG, 'Ability onWindowStageDestroy');
   }
 
   onForeground(): void {
+    transferService.startSharing();
     hilog.info(DOMAIN, TAG, 'Ability onForeground');
   }
 
   onBackground(): void {
+    transferService.stopSharing();
     hilog.info(DOMAIN, TAG, 'Ability onBackground');
   }
 }

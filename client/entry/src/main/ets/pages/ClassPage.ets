@@ -21,6 +21,8 @@ const CLASS_BORDER: string = 'rgba(255,255,255,0.92)';
 export struct ClassPage {
   @State sessions: CourseSession[] = [];
   @State selectedIndex: number = 0;
+  @State compact: boolean = false;
+  @State compactOutline: boolean = false;
   @State detailOpen: boolean = false;
   @State transcript: TranscriptSegment[] = [];
   @State outlineData: Outline | null = null;
@@ -106,7 +108,7 @@ export struct ClassPage {
   }
 
   private canSeeSessionCard(s: CourseSession): boolean {
-    if (!GlobalState.isTeacher() && s.outline_kind === 'official' && s.outline_status !== 'published') {
+    if (!GlobalState.canManageCurrentCourse() && s.outline_kind === 'official' && s.outline_status !== 'published') {
       if (s.creator_id === GlobalState.userId()) {
         s.outline_kind = 'self';
         s.outline_status = s.status;
@@ -135,7 +137,7 @@ export struct ClassPage {
     try {
       this.outlineData = JSON.parse(
         await Api.get(`/sessions/${s.id}/outline?user_id=${GlobalState.userId()}`)) as Outline;
-      if (!GlobalState.isTeacher() && s.outline_kind !== 'personal' && this.outlineData.status !== 'published') {
+      if (!GlobalState.canManageCurrentCourse() && s.outline_kind !== 'personal' && this.outlineData.status !== 'published') {
         this.outlineData = null;
         this.outlineText = '';
         this.outlineDirty = false;
@@ -152,7 +154,7 @@ export struct ClassPage {
   }
 
   private canEditOfficialOutline(): boolean {
-    return GlobalState.isTeacher() && this.outlineData !== null &&
+    return GlobalState.canManageCurrentCourse() && this.outlineData !== null &&
       this.outlineData.owner_id === -1 && this.outlineData.status !== 'published';
   }
 
@@ -183,7 +185,7 @@ export struct ClassPage {
     }
   }
 
-  private async publishDetailOutline(): Promise<void> {
+  private async publishDetailOutline(action: string = 'publish'): Promise<void> {
     const s: CourseSession | null = this.currentSession();
     if (s === null || this.outlineData === null) {
       return;
@@ -199,14 +201,14 @@ export struct ClassPage {
       action: string;
     }
 
-    const body: ReviewBody = { user_id: GlobalState.userId(), action: 'publish' };
+    const body: ReviewBody = { user_id: GlobalState.userId(), action: action };
     this.publishingOutline = true;
     try {
       this.outlineData = JSON.parse(
         await Api.post(`/sessions/${s.id}/outline/review`, body)) as Outline;
       this.outlineText = this.outlineData.markdown;
       this.outlineDirty = false;
-      this.toast('已发布并写入本课程知识库');
+      this.toast(action === 'publish' ? '已发布并写入本课程知识库' : '已撤回官方提纲');
     } catch (e) {
       this.toast(`操作失败：${(e as Error).message}`);
     } finally {
@@ -577,7 +579,7 @@ export struct ClassPage {
             .fontSize(22)
             .fontWeight(FontWeight.Bold)
             .fontColor(AppTheme.INK)
-          Text(GlobalState.isTeacher() ? '完成自己的录音后会显示在这里' : '完成自己的录音，或老师发布官方课时后会显示在这里')
+          Text(GlobalState.canManageCurrentCourse() ? '完成自己的录音后会显示在这里' : '完成自己的录音，或老师发布官方课时后会显示在这里')
             .fontSize(AppTheme.FONT_BODY)
             .fontColor(AppTheme.TEXT_SECONDARY)
         }
@@ -679,6 +681,10 @@ export struct ClassPage {
       }
       .width('100%')
 
+      if (GlobalState.canManageCurrentCourse() && this.outlineData?.status === 'published') {
+        Button('撤回发布').enabled(!this.publishingOutline).fontColor(AppTheme.DANGER)
+          .backgroundColor(Color.Transparent).onClick(() => { this.publishDetailOutline('reject'); })
+      }
       if (this.canEditOfficialOutline()) {
         TextArea({ text: this.outlineText, placeholder: '校准官方提纲内容' })
           .layoutWeight(1)
@@ -780,15 +786,46 @@ export struct ClassPage {
 
   build() {
     Stack() {
+      if (this.compact) {
+        Column({ space: 12 }) {
+          Row({ space: 8 }) {
+            if (this.detailOpen) { Button('返回').onClick(() => { this.detailOpen = false; }) }
+            Text(this.detailOpen ? this.currentSession()?.title ?? '课堂详情' : '课堂').fontSize(20).fontWeight(FontWeight.Bold).layoutWeight(1)
+            if (!this.detailOpen) { Button('录音').backgroundColor(AppTheme.PRIMARY).onClick(() => { AppStorage.setOrCreate<string>('classSubPage', 'record'); }) }
+          }.width('100%')
+          if (this.detailOpen) {
+            Row({ space: 8 }) {
+              Button('转写').layoutWeight(1).onClick(() => { this.compactOutline = false; })
+              Button('提纲').layoutWeight(1).onClick(() => { this.compactOutline = true; })
+            }.width('100%')
+            Row() {
+              if (this.compactOutline) { this.outlinePane() } else { this.transcriptPane() }
+            }.layoutWeight(1).width('100%')
+          } else {
+            List({ space: 12 }) {
+              ForEach(this.sessions, (session: CourseSession, index: number) => {
+                ListItem() {
+                  Column({ space: 8 }) {
+                    Text(session.title).fontSize(17).width('100%')
+                    Text(this.sessionCardDesc(session)).fontSize(13).fontColor(AppTheme.TEXT_SECONDARY).width('100%')
+                  }.padding(16).width('100%').backgroundColor('#FFFFFF').borderRadius(8)
+                }.onClick(() => { this.selectSession(index); this.detailOpen = true; })
+              }, (session: CourseSession) => `${session.id}`)
+            }.layoutWeight(1).width('100%')
+          }
+        }.width('100%').height('100%').padding(16)
+      } else {
       this.pageAtmosphere()
       if (this.detailOpen) {
         this.detailView()
       } else {
         this.listView()
       }
+      }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(CLASS_BG)
+    .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 900 || Number(newArea.height) < 550; })
   }
 }

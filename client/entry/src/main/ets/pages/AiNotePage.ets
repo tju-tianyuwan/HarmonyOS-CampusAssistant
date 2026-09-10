@@ -4,6 +4,7 @@ import { AppTheme } from '../common/AppTheme';
 import { ChatMessageInfo, ChatSessionInfo, KB_FALLBACK_WARNING, Note, UiChatMessage } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
+import { transferService, TransferNote } from '../service/collab/TransferService';
 
 /** 划词命令待回填动作 */
 interface PendingApply {
@@ -37,6 +38,8 @@ export struct AiNotePage {
   @State dirty: boolean = false;
   // AI 面板
   @State aiOpen: boolean = true;
+  @State compact: boolean = false;
+  @State compactTab: string = 'editor';
   @State messages: UiChatMessage[] = [];
   @State inputText: string = '';
   @State asking: boolean = false;
@@ -44,8 +47,21 @@ export struct AiNotePage {
   @State refSelected: boolean[] = [];
   private pending: PendingApply = { mode: 'none', start: 0, end: 0 };
   private msgScroller: Scroller = new Scroller();
+  private answerGeneration: number = 0;
+  private cancelStream: (() => void) | null = null;
+
+  private stopAnswer(): void {
+    this.answerGeneration++;
+    if (this.cancelStream !== null) { this.cancelStream(); this.cancelStream = null; }
+    this.asking = false;
+    this.messages = this.messages.map((message: UiChatMessage): UiChatMessage => {
+      return { role: message.role, content: message.content, sources: message.sources, warning: message.warning, streaming: false };
+    });
+  }
 
   aboutToAppear(): void {
+    transferService.setNoteProvider((): TransferNote | null => this.currentNote() === null ? null :
+      { title: this.noteTitle, kind: 'md', content: this.editorText });
     this.loadChatSessions();
     if (this.createOnAppear) {
       this.createNote();
@@ -56,6 +72,12 @@ export struct AiNotePage {
 
   private toast(msg: string): void {
     promptAction.showToast({ message: msg });
+  }
+
+  aboutToDisappear(): void {
+    this.stopAnswer();
+    transferService.setNoteProvider(null);
+    if (this.cancelStream !== null) { this.cancelStream(); this.cancelStream = null; }
   }
 
   private currentNote(): Note | null {
@@ -224,11 +246,13 @@ export struct AiNotePage {
   }
 
   private async selectChat(index: number): Promise<void> {
+    if (this.asking) { this.stopAnswer(); }
     this.selectedChatIndex = index;
     const cs: ChatSessionInfo = this.chatSessions[index];
     try {
       const list: ChatMessageInfo[] = JSON.parse(
         await Api.get(`/chat/sessions/${cs.id}/messages`)) as ChatMessageInfo[];
+      if (this.chatSessions[this.selectedChatIndex]?.id !== cs.id) { return; }
       this.messages = list.map((m: ChatMessageInfo): UiChatMessage => {
         let sources: string[] = [];
         if (m.sources !== '') {
@@ -322,7 +346,9 @@ export struct AiNotePage {
       user_id: GlobalState.userId(),
       title: firstQuestion.length > 12 ? firstQuestion.substring(0, 12) + '…' : firstQuestion
     };
+    const generation = this.answerGeneration;
     const cs: ChatSessionInfo = JSON.parse(await Api.post('/chat/sessions', body)) as ChatSessionInfo;
+    if (generation !== this.answerGeneration) { return -1; }
     this.chatSessions = [cs].concat(this.chatSessions);
     this.selectedChatIndex = 0;
     this.messages = [];
@@ -344,6 +370,7 @@ export struct AiNotePage {
     }
     this.aiOpen = true;
     this.asking = true;
+    const generation = ++this.answerGeneration;
     let chatId: number = -1;
     try {
       chatId = await this.ensureChatSession(q);
@@ -352,13 +379,14 @@ export struct AiNotePage {
       this.asking = false;
       return;
     }
+    if (generation !== this.answerGeneration || chatId < 0) { return; }
     const userMsg: UiChatMessage = { role: 'user', content: q, sources: [], warning: '', streaming: false };
     const holder: UiChatMessage = { role: 'assistant', content: '', sources: [], warning: '', streaming: true };
     this.messages.push(userMsg);
     this.messages.push(holder);
     this.msgScroller.scrollEdge(Edge.Bottom);
 
-    Api.streamAsk(chatId, q, this.buildContext(), {
+    this.cancelStream = Api.streamAsk(chatId, q, this.buildContext(), {
       onSources: (sources: string[]) => {
         const last: UiChatMessage = this.messages[this.messages.length - 1];
         const next: UiChatMessage =
@@ -655,6 +683,18 @@ export struct AiNotePage {
   @Builder
   editorView() {
     Column({ space: AppTheme.SPACE_M }) {
+      if (this.compact) {
+        TextInput({ text: this.noteTitle, placeholder: '笔记标题' }).enabled(this.canEditCurrent())
+          .onChange((value: string) => { if (value !== this.noteTitle) { this.noteTitle = value; this.dirty = true; } })
+        Row({ space: 8 }) {
+          if (this.dirty) { Text('未保存').fontSize(12).fontColor(AppTheme.WARNING) }
+          Blank()
+          if (this.canEditCurrent()) {
+            Button('保存').backgroundColor(AppTheme.PRIMARY).onClick(() => { this.saveNote(); })
+            Button('删除').fontColor(AppTheme.DANGER).backgroundColor(Color.Transparent).onClick(() => { this.deleteCurrentNote(); })
+          }
+        }.width('100%')
+      } else {
       Row({ space: AppTheme.SPACE_M }) {
         this.sidebarToggleButton()
         TextInput({ text: this.noteTitle, placeholder: '笔记标题' })
@@ -704,9 +744,10 @@ export struct AiNotePage {
         this.aiToggleButton()
       }
       .width('100%')
+      }
 
       if (this.selEnd > this.selStart && !this.readOnly) {
-        Row({ space: AppTheme.SPACE_S }) {
+        Flex({ wrap: FlexWrap.Wrap }) {
           Text('划词命令：').fontSize(AppTheme.FONT_CAPTION).fontColor(AppTheme.TEXT_TERTIARY)
           this.cmdButton('问 AI', 'ask')
           if (this.canEditCurrent()) {
@@ -904,12 +945,13 @@ export struct AiNotePage {
             this.pending = { mode: 'none', start: 0, end: 0 };
             this.send(q);
           })
-        Button(this.asking ? '…' : '发送')
+        Button(this.asking ? '停止' : '发送')
           .fontSize(AppTheme.FONT_BODY)
-          .enabled(!this.asking && !this.readOnly)
+          .enabled(!this.readOnly)
           .backgroundColor(AppTheme.PRIMARY)
           .borderRadius(999)
           .onClick(() => {
+            if (this.asking) { this.stopAnswer(); return; }
             const q: string = this.inputText;
             this.inputText = '';
             this.pending = { mode: 'none', start: 0, end: 0 };
@@ -928,6 +970,18 @@ export struct AiNotePage {
   build() {
     Column({ space: AppTheme.SPACE_M }) {
       this.pageHeader()
+      if (this.compact) {
+        Row({ space: 8 }) {
+          Button('笔记列表').layoutWeight(1).onClick(() => { this.compactTab = 'list'; })
+          Button('编辑').layoutWeight(1).onClick(() => { this.compactTab = 'editor'; })
+          Button('AI').layoutWeight(1).onClick(() => { this.compactTab = 'ai'; })
+        }.width('100%')
+        Row() {
+          if (this.compactTab === 'list') { this.leftPaneView() }
+          else if (this.compactTab === 'ai') { this.aiPanelView() }
+          else { this.editorView() }
+        }.width('100%').layoutWeight(1)
+      } else {
       Row({ space: AppTheme.SPACE_L }) {
         if (this.leftOpen) {
           this.leftPaneView()
@@ -940,10 +994,12 @@ export struct AiNotePage {
       .layoutWeight(1)
       .width('100%')
       .alignItems(VerticalAlign.Top)
+      }
     }
     .width('100%')
     .height('100%')
-    .padding(AppTheme.SPACE_XL)
+    .padding(this.compact ? 12 : AppTheme.SPACE_XL)
     .backgroundColor(AppTheme.BG_PAGE)
+    .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 1000; })
   }
 }

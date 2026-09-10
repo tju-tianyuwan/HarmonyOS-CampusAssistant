@@ -148,6 +148,8 @@ export struct PracticePage {
   @State selectedAnswers: number[] = [-1, -1, -1, -1, -1];
   @State submittedFlags: boolean[] = [false, false, false, false, false];
   @State generating: boolean = false;
+  @State compact: boolean = false;
+  @State compactTab: string = 'questions';
   @State pageReady: boolean = false;
   @State pressedChoice: number = -1;
   private introTimer: number = -1;
@@ -951,6 +953,20 @@ export struct PracticePage {
 
   build() {
     Stack() {
+      if (this.compact) {
+        Column({ space: 8 }) {
+          Row({ space: 8 }) {
+            Button('答题').layoutWeight(1).onClick(() => { this.compactTab = 'questions'; })
+            Button('出题').layoutWeight(1).onClick(() => { this.compactTab = 'generate'; })
+            Button('难度').layoutWeight(1).onClick(() => { this.compactTab = 'difficulty'; })
+          }.width('100%')
+          Row() {
+            if (this.compactTab === 'generate') { this.leftPanel() }
+            else if (this.compactTab === 'difficulty') { this.rightPanel() }
+            else { Scroll() { this.questionPanel() }.width('100%').height('100%').align(Alignment.Top) }
+          }.width('100%').layoutWeight(1)
+        }.width('100%').height('100%').padding(12)
+      } else {
       this.pageAtmosphere()
       Row({ space: AppTheme.SPACE_L }) {
         this.leftPanel()
@@ -970,9 +986,11 @@ export struct PracticePage {
       .width('100%')
       .height('100%')
       .padding({ left: AppTheme.SPACE_XXL, right: AppTheme.SPACE_XXL, top: 28, bottom: AppTheme.SPACE_XXL })
+      }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(PRACTICE_BG)
+    .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 1000 || Number(newArea.height) < 550; })
   }
 }

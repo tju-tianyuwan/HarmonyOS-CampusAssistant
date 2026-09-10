@@ -16,7 +16,7 @@ def _get_client() -> AsyncOpenAI | None:
     if not settings.llm_api_key:
         return None
     if _client is None:
-        _client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+        _client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key, timeout=45, max_retries=1)
     return _client
 
 
@@ -43,10 +43,13 @@ async def chat_stream(system: str, user: str) -> AsyncIterator[str]:
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         stream=True,
     )
-    async for chunk in stream:
-        delta = chunk.choices[0].delta.content if chunk.choices else None
-        if delta:
-            yield delta
+    try:
+        async for chunk in stream:
+            delta = chunk.choices[0].delta.content if chunk.choices else None
+            if delta:
+                yield delta
+    finally:
+        await stream.close()
 
 
 def _mock_reply(system: str, user: str) -> str:

@@ -228,7 +228,7 @@ export struct PersonalNotePage {
         }
         .width('100%')
       }
-      .width(520)
+      .width('92%').constraintSize({ maxWidth: 520 })
       .padding(AppTheme.SPACE_XL)
       .borderRadius(24)
       .backdropBlur(24)

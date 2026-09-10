@@ -17,6 +17,7 @@ export struct NotePage {
   };
   @State pageReady: boolean = false;
   @State pressedEntry: string = '';
+  @State compact: boolean = false;
   private introTimer: number = -1;
 
   aboutToAppear(): void {
@@ -342,6 +343,15 @@ export struct NotePage {
 
   build() {
     Stack() {
+      if (this.compact) {
+        Column({ space: 16 }) {
+          Text('笔记').fontSize(22).fontWeight(FontWeight.Bold).width('100%')
+          Button('班级笔记').width('100%').height(72).fontColor(AppTheme.PRIMARY_DEEP)
+            .backgroundColor(AppTheme.PRIMARY_LIGHT).onClick(() => { this.onOpenClassNotes(); })
+          Button('个人笔记').width('100%').height(72).backgroundColor(AppTheme.PRIMARY)
+            .onClick(() => { this.onOpenPersonalNote(); })
+        }.padding(20).width('100%').height('100%')
+      } else {
       this.pageAtmosphere()
       Column({ space: AppTheme.SPACE_L }) {
         this.heroBand()
@@ -366,9 +376,11 @@ export struct NotePage {
       .translate({ x: 0, y: this.pageReady ? 0 : 24 })
       .scale({ x: this.pageReady ? 1 : 0.986, y: this.pageReady ? 1 : 0.986 })
       .animation({ duration: 360, curve: Curve.EaseOut })
+      }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(NOTE_BG)
+    .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 900 || Number(newArea.height) < 600; })
   }
 }

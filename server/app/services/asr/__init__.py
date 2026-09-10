@@ -2,6 +2,7 @@ from ...config import settings
 from .base import ASRError, ASRProvider, ASRResult
 from .huawei_sis import HuaweiSISASRProvider
 from .mock import MockASRProvider
+from .local import LocalASRProvider, model_path
 from .openai_compatible import OpenAICompatibleASRProvider
 
 __all__ = ["ASRError", "ASRProvider", "ASRResult", "get_asr_provider", "is_asr_configured"]
@@ -15,6 +16,8 @@ def get_asr_provider() -> ASRProvider:
         name = settings.asr_provider.strip().lower()
         if name == "mock":
             _provider = MockASRProvider()
+        elif name == "local":
+            _provider = LocalASRProvider()
         elif name in {"openai", "openai_compatible"}:
             _provider = OpenAICompatibleASRProvider()
         elif name in {"huawei_sis", "sis"}:
@@ -27,7 +30,9 @@ def get_asr_provider() -> ASRProvider:
 def is_asr_configured() -> bool:
     name = settings.asr_provider.strip().lower()
     if name == "mock":
-        return True
+        return False
+    if name == "local":
+        return (model_path() / "model.bin").is_file()
     if name in {"openai", "openai_compatible"}:
         return bool(settings.asr_api_key.strip() and settings.asr_model.strip())
     if name in {"huawei_sis", "sis"}:

@@ -3,10 +3,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
+from starlette.concurrency import run_in_threadpool
 
 from ..db import get_db
 from ..models import ClassCourse, Membership, User
 from ..services import rag
+from ..services.security import current_user, same_user, member
 from ..services.practice import PracticeGenerationError, generate_choice_questions
 
 router = APIRouter(prefix="/practice", tags=["practice"])
@@ -39,7 +41,7 @@ class PracticeGenerationOut(BaseModel):
     knowledge_sources: list[str]
 
 
-def _knowledge_for_request(body: GeneratePracticeBody) -> list[dict[str, str]]:
+def _knowledge_for_request(body: GeneratePracticeBody, db: Session) -> list[dict[str, str]]:
     query_parts = [body.requirements.strip()]
     if body.topic != "综合":
         query_parts.append(body.topic)
@@ -47,9 +49,9 @@ def _knowledge_for_request(body: GeneratePracticeBody) -> list[dict[str, str]]:
         query_parts.append(body.mode)
     query_text = " ".join(part for part in query_parts if part)
 
-    hits = rag.query(body.class_course_id, query_text, top_k=8) if query_text else []
+    hits = rag.query(body.class_course_id, query_text, top_k=8, db=db) if query_text else []
     if len(hits) < 4:
-        hits.extend(rag.list_chunks(body.class_course_id, limit=8))
+        hits.extend(rag.list_chunks(body.class_course_id, limit=8, db=db))
 
     unique: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -65,7 +67,10 @@ def _knowledge_for_request(body: GeneratePracticeBody) -> list[dict[str, str]]:
 
 
 @router.post("/generate", response_model=PracticeGenerationOut)
-async def generate_practice(body: GeneratePracticeBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def generate_practice(body: GeneratePracticeBody, db: Session = Depends(get_db),
+                            actor: User = Depends(current_user)) -> dict[str, Any]:
+    same_user(actor, body.user_id)
+    member(db, actor, body.class_course_id)
     course = db.get(ClassCourse, body.class_course_id)
     if not course:
         raise HTTPException(404, "课程不存在")
@@ -81,7 +86,7 @@ async def generate_practice(body: GeneratePracticeBody, db: Session = Depends(ge
     if not membership:
         raise HTTPException(403, "尚未加入该课程")
 
-    knowledge = _knowledge_for_request(body)
+    knowledge = await run_in_threadpool(_knowledge_for_request, body, db)
     if not knowledge:
         raise HTTPException(409, "当前课程知识库暂无可用于出题的内容")
 

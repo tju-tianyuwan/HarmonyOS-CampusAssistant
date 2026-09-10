@@ -1,10 +1,19 @@
 from sqlalchemy import text
+from sqlalchemy import event
 from sqlmodel import SQLModel, Session, create_engine
 
 from .config import settings
+from .services.locking import process_lock
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+connect_args = {"check_same_thread": False, "timeout": 30} if settings.database_url.startswith("sqlite") else {}
 engine = create_engine(settings.database_url, connect_args=connect_args)
+write_lock = process_lock("database-write")
+
+if settings.database_url.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def configure_sqlite(connection, _):
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA busy_timeout=30000")
 
 
 def init_db() -> None:

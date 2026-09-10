@@ -1,116 +1,144 @@
 import json
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
+from starlette.concurrency import run_in_threadpool
 
-from ..db import get_db
-from ..models import Note
+from ..db import get_db, write_lock
+from ..models import Note, User
 from ..services import rag
 from ..services.llm import chat
+from ..services.security import current_user, same_user, member
 
 router = APIRouter(prefix="/notes", tags=["notes"])
-
-EVAL_SYSTEM = (
-    "你是课堂笔记质量评估器。对给定笔记按 相关性/正确性/结构性 三维打分（0-10），"
-    '只输出 JSON：{"relevance":n,"correctness":n,"structure":n,"pass":true/false}。'
-    "三项均 ≥6 判定 pass 为 true。"
-)
+EVAL_SYSTEM = ('你是课堂笔记质量评估器，按相关性、正确性、结构性打分（0-10），只输出 JSON：'
+               '{"relevance":8,"correctness":8,"structure":8}。三项均不低于6才通过。')
 
 
 class NoteBody(BaseModel):
     class_course_id: int
     owner_id: int
-    title: str
-    kind: str = "md"  # md | handwriting
-    content: str = ""
+    title: str = Field(min_length=1, max_length=200)
+    kind: Literal["md", "handwriting"] = "md"
+    content: str = Field(default="", max_length=2000000)
 
 
 class NoteUpdate(BaseModel):
-    title: str | None = None
-    content: str | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    content: str | None = Field(default=None, max_length=2000000)
+
+
+def owned(db: Session, user: User, note_id: int) -> Note:
+    note = db.get(Note, note_id)
+    if not note:
+        raise HTTPException(404, "笔记不存在")
+    same_user(user, note.owner_id)
+    member(db, user, note.class_course_id)
+    return note
 
 
 @router.get("")
-def list_notes(class_course_id: int, user_id: int, db: Session = Depends(get_db)):
-    """自己的全部笔记 + 他人共享的笔记"""
+def list_notes(class_course_id: int, user_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    same_user(user, user_id)
+    member(db, user, class_course_id)
     notes = db.exec(select(Note).where(Note.class_course_id == class_course_id)).all()
-    return [n for n in notes if n.owner_id == user_id or n.visibility == "shared"]
+    return [n for n in notes if n.owner_id == user.id or n.visibility == "shared"]
 
 
 @router.post("")
-def create_note(body: NoteBody, db: Session = Depends(get_db)):
-    n = Note(**body.model_dump())
-    db.add(n)
+def create_note(body: NoteBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    same_user(user, body.owner_id)
+    member(db, user, body.class_course_id)
+    note = Note(**body.model_dump())
+    db.add(note)
     db.commit()
-    db.refresh(n)
-    return n
+    db.refresh(note)
+    return note
 
 
 @router.put("/{note_id}")
-def update_note(note_id: int, body: NoteUpdate, db: Session = Depends(get_db)):
-    n = db.get(Note, note_id)
-    if not n:
-        raise HTTPException(404, "笔记不存在")
-    if body.title is not None:
-        n.title = body.title
-    if body.content is not None:
-        n.content = body.content
-    n.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(n)
-    return n
+def update_note(note_id: int, body: NoteUpdate, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    with write_lock:
+        note = owned(db, user, note_id)
+        for key, value in body.model_dump(exclude_none=True).items():
+            setattr(note, key, value)
+        note.updated_at = datetime.utcnow()
+        note.quality_status, note.quality_score = "none", None
+        rag.delete_document(note.class_course_id, f"note_{note.id}", db=db)
+        db.commit()
+        db.refresh(note)
+    return note
 
 
 @router.delete("/{note_id}")
-def delete_note(note_id: int, user_id: int, db: Session = Depends(get_db)):
-    n = db.get(Note, note_id)
-    if not n:
-        raise HTTPException(404, "笔记不存在")
-    if n.owner_id != user_id:
-        raise HTTPException(403, "只能删除自己的笔记")
-    rag.delete_document(n.class_course_id, f"note_{n.id}")
-    db.delete(n)
-    db.commit()
+def delete_note(note_id: int, user_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    same_user(user, user_id)
+    with write_lock:
+        note = owned(db, user, note_id)
+        rag.delete_document(note.class_course_id, f"note_{note.id}", db=db)
+        db.delete(note)
+        db.commit()
     return {"ok": True, "id": note_id}
 
 
 @router.post("/{note_id}/share")
-async def share_note(note_id: int, db: Session = Depends(get_db)):
-    """共享 → LLM 质量评估 → 通过则入该集合知识库（仅 MD 笔记）"""
-    n = db.get(Note, note_id)
-    if not n:
-        raise HTTPException(404, "笔记不存在")
-    n.visibility = "shared"
-    if n.kind == "md" and n.content.strip():
-        n.quality_status = "evaluating"
+async def share_note(note_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    with write_lock:
+        note = owned(db, user, note_id)
+        note.visibility = "shared"
+        note.quality_status, note.quality_score = "evaluating" if note.kind == "md" else "none", None
+        note.updated_at = datetime.utcnow()
+        rag.delete_document(note.class_course_id, f"note_{note.id}", db=db)
         db.commit()
-        raw = await chat(EVAL_SYSTEM, n.content)
-        try:
-            verdict = json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())
-        except (json.JSONDecodeError, AttributeError):
-            verdict = {"pass": False}
-        if verdict.get("pass"):
-            n.quality_status = "accepted"
-            n.quality_score = (
-                verdict.get("relevance", 0) + verdict.get("correctness", 0) + verdict.get("structure", 0)
-            ) / 3
-            rag.add_document(n.class_course_id, f"note_{n.id}", n.content, source=f"共享笔记：{n.title}")
-        else:
-            n.quality_status = "rejected"
-    db.commit()
-    db.refresh(n)
-    return n
+        db.refresh(note)
+        version, content = note.updated_at, note.content
+    if note.kind != "md" or not content.strip():
+        note.quality_status = "none"
+        db.commit()
+        return note
+    try:
+        raw = await chat(EVAL_SYSTEM, content)
+        verdict = json.loads(raw.strip().removeprefix("```json").removesuffix("```").strip())
+    except Exception:
+        verdict = {}
+    scores = [verdict.get(key) for key in ("relevance", "correctness", "structure")] if isinstance(verdict, dict) else []
+    accepted = len(scores) == 3 and all(type(score) in (int, float) and 6 <= score <= 10 for score in scores)
+    def save():
+        with write_lock:
+            db.expire_all()
+            latest = db.get(Note, note_id)
+            if not latest or latest.updated_at != version or latest.content != content or latest.visibility != "shared":
+                raise HTTPException(409, "评估期间笔记已修改或取消共享")
+            latest.quality_status = "accepted" if accepted else "rejected"
+            if accepted:
+                latest.quality_score = sum(scores) / 3
+                rag.add_document(latest.class_course_id, f"note_{latest.id}", latest.content,
+                                 source=f"共享笔记：{latest.title}", db=db)
+            db.commit()
+            db.refresh(latest)
+            return latest
+    try:
+        return await run_in_threadpool(save)
+    except Exception:
+        with write_lock:
+            db.rollback()
+            latest = db.get(Note, note_id)
+            if latest and latest.updated_at == version and latest.quality_status == "evaluating":
+                latest.quality_status = "none"
+                db.commit()
+        raise
 
 
 @router.post("/{note_id}/unshare")
-def unshare_note(note_id: int, db: Session = Depends(get_db)):
-    n = db.get(Note, note_id)
-    if not n:
-        raise HTTPException(404, "笔记不存在")
-    rag.delete_document(n.class_course_id, f"note_{n.id}")
-    n.visibility = "private"
-    db.commit()
-    db.refresh(n)
-    return n
+def unshare_note(note_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    with write_lock:
+        note = owned(db, user, note_id)
+        rag.delete_document(note.class_course_id, f"note_{note.id}", db=db)
+        note.visibility, note.quality_status, note.quality_score = "private", "none", None
+        note.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(note)
+    return note

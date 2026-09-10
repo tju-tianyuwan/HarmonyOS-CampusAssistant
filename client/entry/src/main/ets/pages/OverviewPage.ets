@@ -34,6 +34,7 @@ export struct OverviewPage {
   @State classNoteCount: number = 0;
   @State personalNoteCount: number = 0;
   @State pageReady: boolean = false;
+  @State compact: boolean = false;
   @State statsReady: boolean = false;
   @State entriesReady: boolean = false;
   @State atlasPulse: boolean = false;
@@ -1100,6 +1101,19 @@ export struct OverviewPage {
 
   build() {
     Stack() {
+      if (this.compact) {
+        Scroll() {
+          Column({ space: 16 }) {
+            Text(GlobalState.course?.name ?? '课程概览').fontSize(24).fontWeight(FontWeight.Bold).width('100%')
+            Text(`${this.officialLessonCount} 个官方课时 · ${this.classNoteCount} 篇班级笔记 · ${this.personalNoteCount} 篇个人笔记`)
+              .fontSize(14).fontColor(AppTheme.TEXT_SECONDARY).width('100%')
+            Button('课堂').width('100%').height(60).backgroundColor(AppTheme.PRIMARY).onClick(() => { this.openClassPage(); })
+            Button('AI 问答').width('100%').height(60).backgroundColor(AppTheme.PRIMARY_LIGHT).fontColor(AppTheme.PRIMARY_DEEP).onClick(() => { this.openAiPage(); })
+            Button('笔记').width('100%').height(60).backgroundColor(AppTheme.PRIMARY_LIGHT).fontColor(AppTheme.PRIMARY_DEEP).onClick(() => { this.openNotesPage(); })
+            if (!GlobalState.isTeacher()) { Button('刷题').width('100%').height(60).onClick(() => { this.currentTab = 'practice'; }) }
+          }.width('100%').padding(20)
+        }.width('100%').height('100%').align(Alignment.Top)
+      } else {
       this.pageAtmosphere()
 
       Column({ space: AppTheme.SPACE_L }) {
@@ -1127,9 +1141,11 @@ export struct OverviewPage {
       .width('100%')
       .height('100%')
       .padding({ left: AppTheme.SPACE_XXL, right: AppTheme.SPACE_XXL, top: 34, bottom: AppTheme.SPACE_XXL })
+      }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(BG_CANVAS)
+    .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 1000 || Number(newArea.height) < 650; })
   }
 }

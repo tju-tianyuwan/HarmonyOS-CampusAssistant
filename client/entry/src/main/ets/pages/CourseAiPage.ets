@@ -53,6 +53,8 @@ export struct CourseAiPage {
   @State agents: AiAgentInfo[] = DEFAULT_MAS_AGENTS;
   @State inputText: string = '';
   @State asking: boolean = false;
+  @State compact: boolean = false;
+  @State compactTab: string = 'chat';
   @State analytics: ClassroomAnalytics | null = null;
   @State analyticsLoading: boolean = false;
   @State pageReady: boolean = false;
@@ -61,6 +63,17 @@ export struct CourseAiPage {
   private introTimer: number = -1;
   private pulseTimer: number = -1;
   private analyticsTimer: number = -1;
+  private answerGeneration: number = 0;
+  private cancelStream: (() => void) | null = null;
+
+  private stopAnswer(): void {
+    this.answerGeneration++;
+    if (this.cancelStream !== null) { this.cancelStream(); this.cancelStream = null; }
+    this.asking = false;
+    this.messages = this.messages.map((message: UiChatMessage): UiChatMessage => {
+      return { role: message.role, content: message.content, sources: message.sources, warning: message.warning, streaming: false };
+    });
+  }
 
   aboutToAppear(): void {
     this.loadChatSessions();
@@ -88,6 +101,8 @@ export struct CourseAiPage {
   }
 
   aboutToDisappear(): void {
+    this.stopAnswer();
+    if (this.cancelStream !== null) { this.cancelStream(); this.cancelStream = null; }
     if (this.introTimer >= 0) {
       clearTimeout(this.introTimer);
       this.introTimer = -1;
@@ -272,11 +287,13 @@ export struct CourseAiPage {
   }
 
   private async selectChat(index: number): Promise<void> {
+    if (this.asking) { this.stopAnswer(); }
     this.selectedChatIndex = index;
     const cs: ChatSessionInfo = this.chatSessions[index];
     try {
       const list: ChatMessageInfo[] = JSON.parse(
         await Api.get(`/chat/sessions/${cs.id}/messages`)) as ChatMessageInfo[];
+      if (this.chatSessions[this.selectedChatIndex]?.id !== cs.id) { return; }
       this.messages = list.map((m: ChatMessageInfo): UiChatMessage => {
         let sources: string[] = [];
         if (m.sources !== '') {
@@ -304,6 +321,7 @@ export struct CourseAiPage {
   }
 
   private newSession(): void {
+    this.stopAnswer();
     this.selectedChatIndex = -1;
     this.messages = [];
     this.inputText = '';
@@ -384,7 +402,9 @@ export struct CourseAiPage {
       user_id: GlobalState.userId(),
       title: firstQuestion.length > 14 ? firstQuestion.substring(0, 14) + '…' : firstQuestion
     };
+    const generation = this.answerGeneration;
     const cs: ChatSessionInfo = JSON.parse(await Api.post('/chat/sessions', body)) as ChatSessionInfo;
+    if (generation !== this.answerGeneration) { return -1; }
     this.chatSessions = [cs].concat(this.chatSessions);
     this.selectedChatIndex = 0;
     return cs.id;
@@ -397,6 +417,7 @@ export struct CourseAiPage {
     }
     this.inputText = '';
     this.asking = true;
+    const generation = ++this.answerGeneration;
     const memory: string = this.buildMemory();
     let chatId: number = -1;
     try {
@@ -407,6 +428,7 @@ export struct CourseAiPage {
       return;
     }
 
+    if (generation !== this.answerGeneration || chatId < 0) { return; }
     const userMsg: UiChatMessage = { role: 'user', content: q, sources: [], warning: '', streaming: false };
     const holder: UiChatMessage = { role: 'assistant', content: '', sources: [], warning: '', streaming: true };
     this.messages.push(userMsg);
@@ -417,7 +439,7 @@ export struct CourseAiPage {
     let roundWarning: string = '';
     let agentStarted: boolean = false;
 
-    Api.streamAsk(chatId, q, memory, {
+    this.cancelStream = Api.streamAsk(chatId, q, memory, {
       onSources: (sources: string[]) => {
         roundSources = sources;
         const last: UiChatMessage = this.messages[this.messages.length - 1];
@@ -800,9 +822,13 @@ export struct CourseAiPage {
 
   @Builder
   agentRoster() {
-    Row({ space: AppTheme.SPACE_S }) {
+    Flex({ wrap: this.compact ? FlexWrap.Wrap : FlexWrap.NoWrap }) {
       ForEach(this.agents, (agent: AiAgentInfo) => {
-        this.agentChip(agent)
+        Row() {
+          this.agentChip(agent)
+        }
+        .width(this.compact ? '50%' : '25%')
+        .padding(3)
       }, (agent: AiAgentInfo) => agent.id)
     }
     .width('100%')
@@ -1079,7 +1105,7 @@ export struct CourseAiPage {
       }
       .width('100%')
 
-      this.teacherSpotlightPanel()
+      if (!this.compact) { this.teacherSpotlightPanel() }
 
       Scroll() {
         Column({ space: AppTheme.SPACE_M }) {
@@ -1249,21 +1275,25 @@ export struct CourseAiPage {
   @Builder
   emptyChatState() {
     Column({ space: AppTheme.SPACE_M }) {
+      if (!this.compact) {
       Stack({ alignContent: Alignment.Center }) {
         this.knowledgeGlyph()
       }
       .width(210)
       .height(190)
       .scale({ x: 0.82, y: 0.82 })
+      }
       Text('发起一场课程圆桌')
-        .fontSize(24)
+        .fontSize(this.compact ? 18 : 24)
         .fontWeight(FontWeight.Bold)
         .fontColor(AppTheme.INK)
-      Text('小研、小问、小拓和小结会共享课程资料，从分析、质疑、类比和总结四个角度与你讨论。')
+      if (!this.compact) {
+        Text('小研、小问、小拓和小结会共享课程资料，从分析、质疑、类比和总结四个角度与你讨论。')
         .fontSize(AppTheme.FONT_BODY)
         .fontColor(AppTheme.TEXT_SECONDARY)
         .textAlign(TextAlign.Center)
         .constraintSize({ maxWidth: 520 })
+      }
     }
     .layoutWeight(1)
     .width('100%')
@@ -1283,12 +1313,14 @@ export struct CourseAiPage {
             .fontColor(AppTheme.INK)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text('所有成员共享课程知识库，但会保留不同观点与表达方式')
-            .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.TEXT_TERTIARY)
+          if (!this.compact) {
+            Text('所有成员共享课程知识库，但会保留不同观点与表达方式')
+              .fontSize(AppTheme.FONT_CAPTION)
+              .fontColor(AppTheme.TEXT_TERTIARY)
+          }
         }
         .alignItems(HorizontalAlign.Start)
-        Blank()
+        .layoutWeight(1)
         Text(this.asking ? '讨论中' : '圆桌就绪')
           .fontSize(AppTheme.FONT_CAPTION)
           .fontColor(this.asking ? AI_VIOLET : AppTheme.PRIMARY)
@@ -1328,20 +1360,21 @@ export struct CourseAiPage {
           .onSubmit(() => {
             this.send();
           })
-        Button(this.asking ? '讨论中' : '发起讨论')
+        Button(this.asking ? '停止' : '发起讨论')
           .fontSize(AppTheme.FONT_BODY)
-          .enabled(!this.asking)
+          .enabled(true)
           .fontColor('#FFFFFF')
-          .width(112)
+          .width(this.compact ? 88 : 112)
           .height(46)
           .backgroundColor(this.asking ? AI_VIOLET : AppTheme.PRIMARY)
           .borderRadius(999)
           .onClick(() => {
+            if (this.asking) { this.stopAnswer(); return; }
             this.send();
           })
       }
       .width('100%')
-      .padding(AppTheme.SPACE_M)
+      .padding(this.compact ? 8 : AppTheme.SPACE_M)
       .borderRadius(28)
       .backgroundColor('rgba(255,255,255,0.88)')
       .border({ width: 1.2, color: AI_BORDER })
@@ -1349,7 +1382,7 @@ export struct CourseAiPage {
     }
     .layoutWeight(1)
     .height('100%')
-    .padding(AppTheme.SPACE_L)
+    .padding(this.compact ? 12 : AppTheme.SPACE_L)
     .borderRadius(30)
     .backgroundColor('rgba(255,255,255,0.72)')
     .border({ width: 1.2, color: AI_BORDER })
@@ -1563,21 +1596,22 @@ export struct CourseAiPage {
           .onSubmit(() => {
             this.send();
           })
-        Button(this.asking ? '…' : '问')
+        Button(this.asking ? '停止' : '问')
           .fontSize(AppTheme.FONT_CAPTION)
-          .enabled(!this.asking)
+          .enabled(true)
           .fontColor('#FFFFFF')
           .width(58)
           .height(42)
           .backgroundColor(this.asking ? AI_VIOLET : AppTheme.PRIMARY)
           .borderRadius(21)
           .onClick(() => {
+            if (this.asking) { this.stopAnswer(); return; }
             this.send();
           })
       }
       .width('100%')
     }
-    .width(420)
+    .width(this.compact ? '100%' : 420)
     .height('100%')
     .padding(AppTheme.SPACE_L)
     .borderRadius(30)
@@ -1588,6 +1622,31 @@ export struct CourseAiPage {
 
   build() {
     Stack() {
+      if (this.compact) {
+        Column({ space: 10 }) {
+          Row({ space: 8 }) {
+            Button('对话').layoutWeight(1)
+              .backgroundColor(this.compactTab === 'chat' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
+              .fontColor(this.compactTab === 'chat' ? '#FFFFFF' : AppTheme.PRIMARY_DEEP)
+              .onClick(() => { this.compactTab = 'chat'; })
+            Button('历史').layoutWeight(1)
+              .backgroundColor(this.compactTab === 'history' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
+              .fontColor(this.compactTab === 'history' ? '#FFFFFF' : AppTheme.PRIMARY_DEEP)
+              .onClick(() => { this.compactTab = 'history'; })
+            if (GlobalState.isTeacher()) {
+              Button('学情').layoutWeight(1)
+                .backgroundColor(this.compactTab === 'insights' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
+                .fontColor(this.compactTab === 'insights' ? '#FFFFFF' : AppTheme.PRIMARY_DEEP)
+                .onClick(() => { this.compactTab = 'insights'; })
+            }
+          }.width('100%')
+          Row() {
+            if (this.compactTab === 'insights') { this.teacherInsightPane() }
+            else if (this.compactTab === 'history') { this.historyPane() }
+            else { this.chatPane() }
+          }.width('100%').layoutWeight(1)
+        }.width('100%').height('100%').padding(12)
+      } else {
       Column()
         .width('100%')
         .height('100%')
@@ -1633,9 +1692,11 @@ export struct CourseAiPage {
       .translate({ x: 0, y: this.pageReady ? 0 : 24 })
       .scale({ x: this.pageReady ? 1 : 0.986, y: this.pageReady ? 1 : 0.986 })
       .animation({ duration: 360, curve: Curve.EaseOut })
+      }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(AI_BG)
+    .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 1000 || Number(newArea.height) < 550; })
   }
 }

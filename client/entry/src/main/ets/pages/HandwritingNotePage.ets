@@ -4,6 +4,9 @@ import { HandwritingBoard } from '../common/components/HandwritingBoard';
 import { Note } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
+import { common } from '@kit.AbilityKit';
+import { NoteDraftStore } from '../service/NoteDraftStore';
+import { transferService, TransferNote } from '../service/collab/TransferService';
 
 /**
  * 手写笔记页：个人笔记卡片进入后，全屏书写 + 浮动操作栏。
@@ -21,10 +24,22 @@ export struct HandwritingNotePage {
   @State noteTitle: string = '';
   @State dirty: boolean = false;
   @State sharing: boolean = false;
+  @State saving: boolean = false;
+  @State compact: boolean = false;
+  private drafts: NoteDraftStore | null = null;
+  private leaving: boolean = false;
+  private active: boolean = true;
   /** 手写画板重建开关：切换笔记时强制重建组件加载新笔迹 */
   @State boardKey: number = 0;
 
   aboutToAppear(): void {
+    this.active = true;
+    try {
+      this.drafts = new NoteDraftStore((getContext(this) as common.UIAbilityContext).filesDir, Api.BASE_URL, GlobalState.userId());
+    } catch (e) { this.toast('草稿存储不可用，请及时保存'); }
+    GlobalState.beforeLeaveNote = (done: () => void) => { this.leave(done); };
+    transferService.setNoteProvider((): TransferNote | null => this.current() === null ? null :
+      { title: this.noteTitle, kind: 'handwriting', content: this.editorText });
     if (this.createOnAppear) {
       this.createNote('handwriting');
     } else {
@@ -34,6 +49,47 @@ export struct HandwritingNotePage {
 
   private toast(msg: string): void {
     promptAction.showToast({ message: msg });
+  }
+
+  aboutToDisappear(): void {
+    if (this.dirty) { this.cacheDraft(); }
+    this.active = false;
+    GlobalState.beforeLeaveNote = null;
+    transferService.setNoteProvider(null);
+  }
+
+  private cacheDraft(): boolean {
+    const note = this.current();
+    if (note === null || !this.canEditCurrent() || this.drafts === null) { return false; }
+    try { this.drafts.save(note.id, { title: this.noteTitle, content: this.editorText }); return true; }
+    catch (e) { this.toast('草稿写入失败，请保存后离开'); return false; }
+  }
+
+  private async leave(done: () => void): Promise<void> {
+    if (this.leaving || this.saving || this.sharing) { return; }
+    if (!this.dirty) { done(); return; }
+    this.leaving = true;
+    try {
+      const cached = this.cacheDraft();
+      const result = await promptAction.showDialog({ title: '笔记尚未保存', message: cached ? '保存到服务器后离开，或保留本机草稿？' : '草稿写入失败，请保存到服务器后离开',
+        buttons: [{ text: '取消', color: AppTheme.TEXT_SECONDARY },
+          { text: '保留草稿离开', color: AppTheme.TEXT_SECONDARY }, { text: '保存并离开', color: AppTheme.PRIMARY }] });
+      if (result.index === 1 && cached) { done(); }
+      if (result.index === 2 && await this.persistNote('已保存') && !this.dirty) { done(); }
+    } finally { this.leaving = false; }
+  }
+
+  private async restoreDraft(id: number): Promise<void> {
+    try {
+      const draft = this.drafts?.load(id);
+      if (!draft || (draft.content === this.editorText && draft.title === this.noteTitle)) { return; }
+      const result = await promptAction.showDialog({ title: '发现本机草稿', message: '恢复上次尚未保存的修改？',
+        buttons: [{ text: '使用服务器版本', color: AppTheme.TEXT_SECONDARY }, { text: '恢复草稿', color: AppTheme.PRIMARY }] });
+      if (!this.active || this.current()?.id !== id) { return; }
+      if (result.index === 1) {
+        this.editorText = draft.content; this.noteTitle = draft.title; this.dirty = true; this.boardKey++;
+      } else if (result.index === 0) { this.drafts?.remove(id); }
+    } catch (e) { this.toast('草稿读取失败，已保留草稿文件'); }
   }
 
   private current(): Note | null {
@@ -84,6 +140,7 @@ export struct HandwritingNotePage {
       this.noteTitle = n.title;
       this.dirty = false;
       this.boardKey += 1;
+      if (this.canEditCurrent()) { this.restoreDraft(n.id); }
     }
   }
 
@@ -125,11 +182,12 @@ export struct HandwritingNotePage {
     }
   }
 
-  private async persistNote(successText: string): Promise<void> {
+  private async persistNote(successText: string): Promise<boolean> {
+    if (this.saving) { return false; }
     const n: Note | null = this.current();
     if (n === null || !this.canEditCurrent()) {
       this.toast('当前笔记为只读');
-      return;
+      return false;
     }
     interface UpdateBody {
       title: string;
@@ -137,14 +195,22 @@ export struct HandwritingNotePage {
     }
 
     const body: UpdateBody = { title: this.noteTitle, content: this.editorText };
+    this.saving = true;
     try {
       await Api.put(`/notes/${n.id}`, body);
-      n.title = this.noteTitle;
-      n.content = this.editorText;
-      this.dirty = false;
+      n.title = body.title;
+      n.content = body.content;
+      if (this.current()?.id === n.id) {
+        this.dirty = this.noteTitle !== body.title || this.editorText !== body.content;
+        if (!this.dirty) { this.drafts?.remove(n.id); } else { this.cacheDraft(); }
+      }
       this.toast(successText);
+      return true;
     } catch (e) {
       this.toast(`保存失败：${(e as Error).message}`);
+      return false;
+    } finally {
+      this.saving = false;
     }
   }
 
@@ -180,6 +246,7 @@ export struct HandwritingNotePage {
     try {
       const deletedIndex: number = this.selectedIndex;
       await Api.remove(`/notes/${n.id}?user_id=${GlobalState.userId()}`);
+      this.drafts?.remove(n.id);
       this.notes = this.notes.filter((item: Note) => item.id !== n.id);
       this.selectedIndex = -1;
       this.editorText = '';
@@ -205,7 +272,8 @@ export struct HandwritingNotePage {
     try {
       if (n.visibility === 'private') {
         if (this.dirty) {
-          await this.saveNote();
+          if (!await this.persistNote('已保存')) { return; }
+          if (this.dirty) { this.toast('笔迹有新修改，请保存后再共享'); return; }
         }
         const updated: Note = JSON.parse(await Api.post(`/notes/${n.id}/share`)) as Note;
         this.notes.splice(this.selectedIndex, 1, updated);
@@ -243,7 +311,7 @@ export struct HandwritingNotePage {
         .borderRadius(18)
         .backgroundColor(AppTheme.BG_CARD)
         .onClick(() => {
-          this.onBack();
+          this.leave(this.onBack);
         })
       Text('手写笔记')
         .fontSize(AppTheme.FONT_TITLE)
@@ -257,6 +325,25 @@ export struct HandwritingNotePage {
 
   @Builder
   floatingToolbar() {
+    if (this.compact) {
+      Column({ space: 6 }) {
+        Row({ space: 8 }) {
+          Button('返回').backgroundColor(AppTheme.PRIMARY_LIGHT).fontColor(AppTheme.PRIMARY_DEEP).onClick(() => { this.leave(this.onBack); })
+          TextInput({ text: this.noteTitle, placeholder: '笔记标题' }).layoutWeight(1).enabled(this.canEditCurrent())
+            .onChange((value: string) => { if (value !== this.noteTitle) { this.noteTitle = value; this.dirty = true; this.cacheDraft(); } })
+        }.width('100%')
+        Row({ space: 8 }) {
+          if (this.dirty) { Text('未保存').fontSize(12).fontColor(AppTheme.WARNING) }
+          Blank()
+          if (this.canEditCurrent()) {
+            Button('保存').backgroundColor(AppTheme.PRIMARY).enabled(!this.saving && !this.sharing).onClick(() => { this.saveNote(); })
+            Button('删除').fontColor(AppTheme.DANGER).backgroundColor(Color.Transparent).enabled(!this.saving && !this.sharing).onClick(() => { this.deleteCurrentNote(); })
+            Button(this.current()?.visibility === 'private' ? '共享' : '取消共享').backgroundColor(AppTheme.PRIMARY_LIGHT)
+              .fontColor(AppTheme.PRIMARY_DEEP).enabled(!this.saving && !this.sharing).onClick(() => { this.toggleShare(); })
+          } else { Text('只读').fontSize(13) }
+        }.width('100%')
+      }.width('100%').padding(8).backgroundColor(AppTheme.BG_CARD)
+    } else {
     Row({ space: AppTheme.SPACE_M }) {
       Text('‹')
         .fontSize(28)
@@ -267,7 +354,7 @@ export struct HandwritingNotePage {
         .borderRadius(19)
         .backgroundColor('rgba(255,255,255,0.72)')
         .onClick(() => {
-          this.onBack();
+          this.leave(this.onBack);
         })
 
       TextInput({ text: this.noteTitle, placeholder: '笔记标题' })
@@ -278,8 +365,10 @@ export struct HandwritingNotePage {
         .borderRadius(20)
         .enabled(this.canEditCurrent())
         .onChange((v: string) => {
+          if (v === this.noteTitle) { return; }
           this.noteTitle = v;
           this.dirty = true;
+          this.cacheDraft();
         })
 
       if (this.dirty) {
@@ -299,6 +388,7 @@ export struct HandwritingNotePage {
             this.renameNote();
           })
         Button('保存')
+          .enabled(!this.saving && !this.sharing)
           .fontSize(AppTheme.FONT_BODY)
           .height(40)
           .backgroundColor(AppTheme.PRIMARY)
@@ -307,6 +397,7 @@ export struct HandwritingNotePage {
             this.saveNote();
           })
         Button('删除')
+          .enabled(!this.saving && !this.sharing)
           .fontSize(AppTheme.FONT_BODY)
           .height(40)
           .backgroundColor(AppTheme.tagBg(AppTheme.DANGER))
@@ -319,7 +410,7 @@ export struct HandwritingNotePage {
           (this.current() !== null && this.current()!.visibility === 'private' ? '共享' : '取消共享'))
           .fontSize(AppTheme.FONT_BODY)
           .height(40)
-          .enabled(!this.sharing)
+          .enabled(!this.sharing && !this.saving)
           .backgroundColor(this.current() !== null && this.current()!.visibility === 'private' ?
             AppTheme.SUCCESS : 'rgba(255,255,255,0.76)')
           .fontColor(this.current() !== null && this.current()!.visibility === 'private' ?
@@ -337,7 +428,6 @@ export struct HandwritingNotePage {
           .backgroundColor('rgba(255,255,255,0.76)')
       }
     }
-    .width('100%')
     .height(64)
     .padding({ left: AppTheme.SPACE_M, right: AppTheme.SPACE_M })
     .borderRadius(32)
@@ -345,7 +435,9 @@ export struct HandwritingNotePage {
     .backgroundColor('rgba(255,255,255,0.54)')
     .border({ width: 1, color: 'rgba(255,255,255,0.86)' })
     .shadow({ radius: 24, color: 'rgba(32,54,93,0.13)', offsetX: 0, offsetY: 8 })
+    .width('calc(100% - 48vp)')
     .margin({ left: AppTheme.SPACE_XL, right: AppTheme.SPACE_XL, top: AppTheme.SPACE_L })
+    }
   }
 
   @Builder
@@ -358,6 +450,7 @@ export struct HandwritingNotePage {
           onStrokesChanged: (json: string) => {
             this.editorText = json;
             this.dirty = true;
+            this.cacheDraft();
           }
         })
       } else {
@@ -367,6 +460,7 @@ export struct HandwritingNotePage {
           onStrokesChanged: (json: string) => {
             this.editorText = json;
             this.dirty = true;
+            this.cacheDraft();
           }
         })
       }
@@ -411,9 +505,12 @@ export struct HandwritingNotePage {
     if (this.current() === null) {
       this.emptyState()
     } else {
-      Stack({ alignContent: Alignment.TopStart }) {
+      Column() {
+        if (this.compact) { this.floatingToolbar() }
+        Stack({ alignContent: Alignment.TopStart }) {
         this.handwritingBoardLayer()
-        this.floatingToolbar()
+        if (!this.compact) { this.floatingToolbar() }
+        }.width('100%').layoutWeight(1)
       }
       .width('100%')
       .height('100%')
@@ -427,5 +524,6 @@ export struct HandwritingNotePage {
     .width('100%')
     .height('100%')
     .backgroundColor(AppTheme.BG_PAGE)
+    .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 760; })
   }
 }

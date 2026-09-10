@@ -5,6 +5,18 @@ export interface UserInfo {
   id: number;
   name: string;
   role: string; // teacher | student
+  account_type?: string;
+  email?: string;
+  school_name?: string;
+  student_number?: string;
+  school_verification_status?: string;
+  personal_workspace_id?: number;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  user: UserInfo;
+  expires_in: number;
 }
 
 export interface ClassCourse {
@@ -15,6 +27,7 @@ export interface ClassCourse {
   invite_code: string;
   created_at: string;
   teacher_name?: string;
+  is_personal?: boolean;
 }
 
 export interface CourseWorkspaceStats {
@@ -111,6 +124,8 @@ export interface Stroke {
 
 export interface HandwritingDoc {
   strokes: Stroke[];
+  width?: number;
+  height?: number;
 }
 
 /** 问答界面的本地消息模型（含流式中间态） */

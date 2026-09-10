@@ -1,6 +1,11 @@
+import { AuthPage } from './AuthPage';
+import { inputMethod } from '@kit.IMEKit';
+import { KnowledgePage } from './KnowledgePage';
+import { MeetingPage } from './MeetingPage';
 import { AppTheme } from '../common/AppTheme';
-import { UserInfo } from '../model/Models';
+import { AuthResponse, ClassCourse, UserInfo } from '../model/Models';
 import { Api } from '../service/Api';
+import { SessionStore } from '../service/SessionStore';
 import { GlobalState } from '../service/GlobalState';
 import { CollabManager } from '../service/collab/CollabManager';
 import { LibraryPage } from './LibraryPage';
@@ -25,6 +30,8 @@ interface TabItem {
 }
 
 const TABS: TabItem[] = [
+  { key: 'knowledge', label: '知识库', teacherOnly: false, studentOnly: false },
+  { key: 'meetings', label: '聊天室', teacherOnly: false, studentOnly: false },
   { key: 'overview', label: '概览', teacherOnly: false, studentOnly: false },
   { key: 'class', label: '课堂', teacherOnly: false, studentOnly: false },
   { key: 'course_ai', label: 'AI', teacherOnly: false, studentOnly: false },
@@ -50,13 +57,15 @@ struct Index {
   @State selectedNoteId: number = -1;
   @State createNoteOnOpen: boolean = false;
   @State noteReadonly: boolean = false;
-  @State users: UserInfo[] = [];
-  @State loadError: string = '';
+  @StorageLink('authExpiredTick') @Watch('onAuthExpired') authExpiredTick: number = 0;
+  @StorageLink('recordingActive') recordingActive: boolean = false;
   @State showSettings: boolean = false;
+  @State compactLayout: boolean = false;
   @State workspaceClosing: boolean = false;
   @State libraryReturnActive: boolean = true;
   @State loginPageActive: boolean = true;
   @State recordEntryPressed: boolean = false;
+  @State restoring: boolean = true;
   private stageTimer: number = -1;
 
   aboutToAppear(): void {
@@ -74,12 +83,7 @@ struct Index {
       this.noteBackTarget = 'hub';
       this.noteReadonly = false;
     }
-    this.loadUsers();
-    // 冷启动迁移恢复：EntryAbility 已写入状态，但 @Watch 不触发初始化
-    const pending: string | undefined = AppStorage.get<string>('continueRestoreState');
-    if (pending !== undefined && pending !== '') {
-      this.onContinueRestore();
-    }
+    this.restoreAccount().finally(() => { this.restoring = false; });
   }
 
   private normalizeWorkspaceTab(tab: string): string {
@@ -102,6 +106,23 @@ struct Index {
     this.stopStageAnimation();
   }
 
+  onBackPress(): boolean {
+    if (AppStorage.get<boolean>('accountInputFocused') === true) {
+      AppStorage.setOrCreate<boolean>('accountInputFocused', false);
+      inputMethod.getController().hideTextInput().catch(() => {});
+      return true;
+    }
+    if ((AppStorage.get<number>('keyboardHeight') ?? 0) > 0) { return false; }
+    if (this.recordingActive) { return true; }
+    if (this.showSettings) { this.showSettings = false; return true; }
+    if (GlobalState.beforeLeaveNote !== null) {
+      GlobalState.beforeLeaveNote(() => { this.noteSubPage = this.noteBackTarget; });
+      return true;
+    }
+    if (this.stage === 'workspace') { this.returnToLibrary(); return true; }
+    return false;
+  }
+
   private stopStageAnimation(): void {
     if (this.stageTimer >= 0) {
       clearTimeout(this.stageTimer);
@@ -110,6 +131,13 @@ struct Index {
   }
 
   private returnToLibrary(): void {
+    if (GlobalState.beforeLeaveNote !== null) {
+      GlobalState.beforeLeaveNote(() => { this.finishReturnToLibrary(); });
+    } else { this.finishReturnToLibrary(); }
+  }
+
+  private finishReturnToLibrary(): void {
+    if (this.recordingActive) { return; }
     if (this.workspaceClosing) {
       return;
     }
@@ -130,85 +158,77 @@ struct Index {
   }
 
   private logoutToLogin(): void {
+    if (this.recordingActive) { return; }
+    Api.post('/auth/logout').catch(() => {});
+    this.onAuthExpired();
+  }
+
+  private onAuthExpired(): void {
     this.stopStageAnimation();
     CollabManager.stop();
-    GlobalState.setCourse(null);
+    Api.setAccessToken('');
+    SessionStore.save(Api.BASE_URL, '').catch(() => {});
+    GlobalState.clearSession();
+    this.stage = 'login';
     this.showSettings = false;
-    this.workspaceClosing = this.stage === 'workspace';
-    this.libraryReturnActive = this.stage === 'library' ? false : this.libraryReturnActive;
-    this.stageTimer = setTimeout(() => {
-      this.stageTimer = -1;
-      GlobalState.user = null;
-      this.stage = 'login';
-      this.workspaceClosing = false;
-      this.libraryReturnActive = true;
-      this.loginPageActive = false;
-      this.stageTimer = setTimeout(() => {
-        this.loginPageActive = true;
-        this.stageTimer = -1;
-      }, 24);
-    }, 240);
+    this.workspaceClosing = false;
+    this.loginPageActive = true;
+    this.libraryReturnActive = true;
   }
 
-  /** 跨端迁移：目标端恢复学习状态 */
-  onContinueRestore(): void {
-    const state: string | undefined = AppStorage.get<string>('continueRestoreState');
-    if (state === undefined || state === '') {
-      return;
-    }
-    AppStorage.setOrCreate<string>('continueRestoreState', '');
-    const tab: string = GlobalState.restoreFromJson(state);
-    const normalizedTab: string = this.normalizeWorkspaceTab(tab);
-    if (GlobalState.user === null) {
-      this.stage = 'login';
-      this.loginPageActive = true;
-      this.libraryReturnActive = true;
-      return;
-    }
-    if (GlobalState.course !== null) {
-      this.currentTab = normalizedTab === '' ? 'overview' : normalizedTab;
-      this.classSubPage = tab === 'record' ? 'record' : 'list';
-      this.noteSubPage = tab === 'ai' ? 'ai' : 'hub';
-      this.noteBackTarget = 'hub';
-      this.noteReadonly = false;
-      this.stage = 'workspace';
-      this.loginPageActive = true;
-      this.libraryReturnActive = false;
-    } else {
-      this.stage = 'library';
-      this.noteSubPage = 'hub';
-      this.loginPageActive = true;
-      this.libraryReturnActive = true;
-    }
+  private completeAuth(response: AuthResponse): void {
+    Api.setAccessToken(response.access_token);
+    SessionStore.save(Api.BASE_URL, response.access_token).catch(() => {});
+    GlobalState.accessToken = response.access_token;
+    GlobalState.user = response.user;
+    GlobalState.setCourse(null);
+    this.stage = 'library';
+    this.libraryReturnActive = true;
+    this.loginPageActive = true;
   }
 
-  private async loadUsers(): Promise<void> {
+  private async restoreAccount(): Promise<void> {
+    const initialToken = Api.token;
+    const initialServer = Api.BASE_URL;
+    const saved = await SessionStore.load();
+    if (Api.token !== initialToken || Api.BASE_URL !== initialServer) { return; }
+    if (Api.token === '' && saved !== null) {
+      Api.BASE_URL = saved.server;
+      Api.setAccessToken(saved.token);
+    }
+    if (Api.token === '') { return; }
+    const token = Api.token;
     try {
-      this.users = JSON.parse(await Api.get('/auth/users')) as UserInfo[];
-      this.loadError = '';
-    } catch (e) {
-      this.loadError = `无法连接服务端：${(e as Error).message}`;
-    }
-  }
-
-  private login(u: UserInfo): void {
-    this.stopStageAnimation();
-    this.loginPageActive = false;
-    this.stageTimer = setTimeout(() => {
-      this.stageTimer = -1;
-      GlobalState.user = u;
+      const user = JSON.parse(await Api.get('/auth/me')) as UserInfo;
+      if (Api.token !== token) { return; }
+      GlobalState.user = user;
+      GlobalState.accessToken = token;
       this.stage = 'library';
-      this.libraryReturnActive = false;
-      GlobalState.updateSnapshot('overview');
-      this.stageTimer = setTimeout(() => {
-        this.libraryReturnActive = true;
-        this.stageTimer = -1;
-      }, 24);
-    }, 240);
+      await this.onContinueRestore();
+    } catch (e) { if (Api.token === token) { this.onAuthExpired(); } }
   }
 
-  private avatarColor(u: UserInfo): string {
-    return u.role === 'teacher' ? AppTheme.INK : AppTheme.PRIMARY;
+  async onContinueRestore(): Promise<void> {
+    if (this.recordingActive) { return; }
+    const state = AppStorage.get<string>('continueRestoreState') ?? '';
+    if (state === '' || GlobalState.user === null || Api.token === '') { return; }
+    AppStorage.setOrCreate<string>('continueRestoreState', '');
+    const token = Api.token;
+    const tab = GlobalState.restoreFromJson(state);
+    if (tab === '') { return; }
+    const requested = GlobalState.courseId();
+    try {
+      const courses = JSON.parse(await Api.get(`/courses?user_id=${GlobalState.userId()}`)) as ClassCourse[];
+      if (Api.token !== token) { return; }
+      GlobalState.setCourse(courses.find((course: ClassCourse) => course.id === requested) ?? null);
+      const candidate = this.normalizeWorkspaceTab(tab);
+      this.currentTab = TABS.some((item: TabItem) => item.key === candidate &&
+        (!item.teacherOnly || GlobalState.canManageCurrentCourse()) &&
+        (!item.studentOnly || !GlobalState.isTeacher())) ? candidate : 'overview';
+      this.classSubPage = 'list';
+      this.noteSubPage = 'hub';
+      this.stage = GlobalState.course === null ? 'library' : 'workspace';
+    } catch (e) { this.onAuthExpired(); }
   }
 
   private shouldShowRecordEntry(): boolean {
@@ -216,12 +236,14 @@ struct Index {
   }
 
   private openRecordPage(): void {
+    if (this.recordingActive) { return; }
     this.currentTab = 'class';
     this.classSubPage = 'record';
     GlobalState.updateSnapshot('class');
   }
 
   private shouldShowWorkbenchSwitcher(): boolean {
+    if (this.currentTab === 'knowledge' || this.currentTab === 'meetings' || this.currentTab === 'review') { return true; }
     if (this.currentTab === 'overview' || this.currentTab === 'class' || this.currentTab === 'course_ai' ||
       this.currentTab === 'practice') {
       return true;
@@ -230,6 +252,7 @@ struct Index {
   }
 
   private switchToOverviewPage(): void {
+    if (this.recordingActive) { return; }
     this.currentTab = 'overview';
     this.classSubPage = 'list';
     this.noteSubPage = 'hub';
@@ -238,17 +261,20 @@ struct Index {
   }
 
   private switchToClassPage(): void {
+    if (this.recordingActive) { return; }
     this.currentTab = 'class';
     this.classSubPage = 'list';
     GlobalState.updateSnapshot('class');
   }
 
   private switchToAiPage(): void {
+    if (this.recordingActive) { return; }
     this.currentTab = 'course_ai';
     GlobalState.updateSnapshot('course_ai');
   }
 
   private switchToNotesPage(): void {
+    if (this.recordingActive) { return; }
     this.currentTab = 'notes';
     this.noteSubPage = 'hub';
     this.noteReadonly = false;
@@ -256,11 +282,17 @@ struct Index {
   }
 
   private switchToPracticePage(): void {
+    if (this.recordingActive) { return; }
     this.currentTab = 'practice';
     GlobalState.updateSnapshot('practice');
   }
 
   private backFromWorkspace(): void {
+    if (GlobalState.beforeLeaveNote !== null) {
+      GlobalState.beforeLeaveNote(() => { this.noteSubPage = this.noteBackTarget; });
+      return;
+    }
+    if (this.recordingActive) { return; }
     if (this.currentTab === 'class' || this.currentTab === 'course_ai' || this.currentTab === 'practice' ||
       this.currentTab === 'notes') {
       this.currentTab = 'overview';
@@ -271,88 +303,6 @@ struct Index {
       return;
     }
     this.returnToLibrary();
-  }
-
-  // ============ 登录页 ============
-  @Builder
-  loginView() {
-    Column() {
-      Blank().layoutWeight(1)
-      Stack({ alignContent: Alignment.Center }) {
-        Column()
-          .width(96)
-          .height(96)
-          .borderRadius(28)
-          .backgroundColor(AppTheme.PRIMARY)
-        Text('伴')
-          .fontSize(48)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-      }
-      .margin({ bottom: AppTheme.SPACE_XL })
-
-      Text('智慧伴学')
-        .fontSize(40)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(AppTheme.INK)
-      Text('课堂灵感 · 一触即达')
-        .fontSize(AppTheme.FONT_SUBTITLE)
-        .fontColor(AppTheme.TEXT_TERTIARY)
-        .margin({ top: AppTheme.SPACE_S, bottom: AppTheme.SPACE_XXL })
-
-      if (this.loadError !== '') {
-        Column({ space: AppTheme.SPACE_M }) {
-          Text(this.loadError).fontSize(AppTheme.FONT_CAPTION).fontColor(AppTheme.DANGER)
-          Button('重试')
-            .fontSize(AppTheme.FONT_BODY)
-            .fontColor('#FFFFFF')
-            .backgroundColor(AppTheme.PRIMARY)
-            .borderRadius(999)
-            .onClick(() => {
-              this.loadUsers();
-            })
-        }
-      } else {
-        Row({ space: AppTheme.SPACE_XL }) {
-          ForEach(this.users, (u: UserInfo) => {
-            Column({ space: AppTheme.SPACE_M }) {
-              Text(u.name.substring(0, 1))
-                .fontSize(30)
-                .fontColor('#FFFFFF')
-                .width(72)
-                .height(72)
-                .textAlign(TextAlign.Center)
-                .borderRadius(36)
-                .backgroundColor(this.avatarColor(u))
-              Text(u.name)
-                .fontSize(AppTheme.FONT_SUBTITLE)
-                .fontColor(AppTheme.TEXT_PRIMARY)
-              Text(u.role === 'teacher' ? '教师' : '学生')
-                .fontSize(AppTheme.FONT_CAPTION)
-                .fontColor('#FFFFFF')
-                .padding({ left: 10, right: 10, top: 3, bottom: 3 })
-                .borderRadius(999)
-                .backgroundColor(u.role === 'teacher' ? AppTheme.INK : AppTheme.PRIMARY)
-            }
-            .padding(AppTheme.SPACE_XL)
-            .borderRadius(20)
-            .backgroundColor(AppTheme.BG_CARD)
-            .shadow({ radius: 24, color: 'rgba(0,0,0,0.06)', offsetX: 0, offsetY: 6 })
-            .onClick(() => {
-              this.login(u);
-            })
-          }, (u: UserInfo) => `${u.id}`)
-        }
-        Text('Demo 预置账号 · 点击头像进入')
-          .fontSize(AppTheme.FONT_CAPTION)
-          .fontColor(AppTheme.TEXT_TERTIARY)
-          .margin({ top: AppTheme.SPACE_L })
-      }
-      Blank().layoutWeight(1)
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(AppTheme.BG_WHITE)
   }
 
   // ============ 顶部标签栏 ============
@@ -370,6 +320,7 @@ struct Index {
         .backgroundColor(this.currentTab === item.key ? AppTheme.PRIMARY : 'transparent')
     }
     .onClick(() => {
+      if (this.recordingActive) { return; }
       this.currentTab = item.key;
       if (item.key === 'class') {
         this.classSubPage = 'list';
@@ -478,14 +429,15 @@ struct Index {
   @Builder
   islandButton(key: string, label: string, enabled: boolean, onTap: () => void) {
     Button(label)
-      .fontSize(AppTheme.FONT_BODY)
+      .fontSize(14)
+      .padding({ left: 8, right: 8 })
       .fontWeight(this.currentTab === key ? FontWeight.Bold : FontWeight.Medium)
       .fontColor(this.currentTab === key ? '#FFFFFF' : AppTheme.TEXT_SECONDARY)
-      .width(86)
+      .width(70)
       .height(38)
       .borderRadius(19)
       .backgroundColor(this.currentTab === key ? AppTheme.PRIMARY : 'transparent')
-      .enabled(enabled)
+      .enabled(enabled && !this.recordingActive)
       .onClick(() => {
         onTap();
       })
@@ -495,6 +447,7 @@ struct Index {
   workbenchSwitcher() {
     Row() {
       Blank()
+      Scroll() {
       Row({ space: 4 }) {
         this.islandButton('overview', '概览', true, (): void => {
           this.switchToOverviewPage();
@@ -513,6 +466,11 @@ struct Index {
         this.islandButton('notes', '笔记', true, (): void => {
           this.switchToNotesPage();
         })
+        this.islandButton('knowledge', '知识库', true, (): void => { this.currentTab = 'knowledge'; })
+        this.islandButton('meetings', '聊天室', true, (): void => { this.currentTab = 'meetings'; })
+        if (GlobalState.canManageCurrentCourse()) {
+          this.islandButton('review', '审核', true, (): void => { this.currentTab = 'review'; })
+        }
       }
       .height(50)
       .padding(6)
@@ -520,11 +478,13 @@ struct Index {
       .backgroundColor('rgba(255,255,255,0.88)')
       .border({ width: 1.2, color: 'rgba(255,255,255,0.94)' })
       .shadow({ radius: 22, color: 'rgba(31,62,68,0.13)', offsetX: 0, offsetY: 8 })
+      }.scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+        .constraintSize({ maxWidth: this.compactLayout ? '100%' : '78%' }).height(56)
       Blank()
     }
     .width('100%')
-    .height(78)
-    .padding({ top: AppTheme.SPACE_M })
+    .height(this.compactLayout ? 128 : 78)
+    .padding({ top: this.compactLayout ? 68 : AppTheme.SPACE_M })
     .zIndex(40)
   }
 
@@ -734,7 +694,11 @@ struct Index {
                 }
               })
             }
-          } else if (this.currentTab === 'review') {
+          } else if (this.currentTab === 'knowledge') {
+            KnowledgePage()
+          } else if (this.currentTab === 'meetings') {
+            MeetingPage()
+          } else if (this.currentTab === 'review' && GlobalState.canManageCurrentCourse()) {
             ReviewPage()
           }
         }
@@ -764,9 +728,11 @@ struct Index {
 
   build() {
     Stack() {
-      if (this.stage === 'login') {
+      if (this.restoring) {
+        LoadingProgress().width(40).height(40)
+      } else if (this.stage === 'login') {
         Stack() {
-          this.loginView()
+          AuthPage({ onAuthenticated: (response: AuthResponse) => { this.completeAuth(response); } })
         }
         .width('100%')
         .height('100%')
@@ -826,5 +792,6 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+    .onAreaChange((oldArea: Area, newArea: Area) => { this.compactLayout = Number(newArea.width) < 760; })
   }
 }

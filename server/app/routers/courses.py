@@ -1,4 +1,4 @@
-import random
+import secrets
 import string
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -6,8 +6,9 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from ..db import get_db
-from ..models import ClassCourse, CourseSession, Membership, Note, Outline, User
+from ..db import get_db, write_lock
+from ..models import ClassCourse, CourseSession, Membership, Note, Outline, PersonalWorkspace, User
+from ..services.security import current_user, same_user
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
@@ -31,8 +32,9 @@ class CourseWorkspaceStats(BaseModel):
 
 
 @router.get("")
-def list_courses(user_id: int, db: Session = Depends(get_db)):
+def list_courses(user_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
     """用户已加入的课程集合"""
+    same_user(user, user_id)
     mids = db.exec(select(Membership.class_course_id).where(Membership.user_id == user_id)).all()
     if not mids:
         return []
@@ -40,7 +42,9 @@ def list_courses(user_id: int, db: Session = Depends(get_db)):
     result = []
     for c in courses:
         teacher = db.get(User, c.teacher_id)
-        result.append({**c.model_dump(), "teacher_name": teacher.name if teacher else ""})
+        personal = db.exec(select(PersonalWorkspace).where(PersonalWorkspace.class_course_id == c.id)).first()
+        result.append({**c.model_dump(), "teacher_name": teacher.name if teacher else "",
+                       "is_personal": personal is not None, "invite_code": "" if personal else c.invite_code})
     return result
 
 
@@ -50,9 +54,11 @@ def course_workspace_stats(
     user_id: int,
     response: Response,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """课程工作台统计；所有数据严格限定在当前课程数据域。"""
     response.headers["Cache-Control"] = "no-store"
+    same_user(user, user_id)
     cc = db.get(ClassCourse, class_course_id)
     if not cc:
         raise HTTPException(404, "课程不存在")
@@ -97,25 +103,32 @@ def course_workspace_stats(
 
 
 @router.post("")
-def create_course(body: CreateCourse, db: Session = Depends(get_db)):
+def create_course(body: CreateCourse, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    same_user(user, body.teacher_id)
     teacher = db.get(User, body.teacher_id)
     if not teacher or teacher.role != "teacher":
         raise HTTPException(403, "仅教师可创建课程集合")
-    code = "".join(random.choices(string.digits, k=6))
-    cc = ClassCourse(name=body.name, class_name=body.class_name, teacher_id=body.teacher_id, invite_code=code)
-    db.add(cc)
-    db.commit()
-    db.refresh(cc)
-    db.add(Membership(user_id=body.teacher_id, class_course_id=cc.id))
-    db.commit()
+    with write_lock:
+        for _ in range(100):
+            code = "".join(secrets.choice(string.digits) for _ in range(6))
+            if not db.exec(select(ClassCourse).where(ClassCourse.invite_code == code)).first():
+                break
+        else:
+            raise HTTPException(503, "邀请码生成失败，请重试")
+        cc = ClassCourse(name=body.name, class_name=body.class_name, teacher_id=body.teacher_id, invite_code=code)
+        db.add(cc)
+        db.flush()
+        db.add(Membership(user_id=body.teacher_id, class_course_id=cc.id))
+        db.commit()
     db.refresh(cc)
     return cc
 
 
 @router.post("/join")
-def join_course(body: JoinCourse, db: Session = Depends(get_db)):
+def join_course(body: JoinCourse, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    same_user(user, body.user_id)
     cc = db.exec(select(ClassCourse).where(ClassCourse.invite_code == body.invite_code)).first()
-    if not cc:
+    if not cc or db.exec(select(PersonalWorkspace).where(PersonalWorkspace.class_course_id == cc.id)).first():
         raise HTTPException(404, "邀请码无效")
     exists = db.exec(
         select(Membership).where(Membership.user_id == body.user_id, Membership.class_course_id == cc.id)

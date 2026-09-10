@@ -4,7 +4,10 @@ import { promptAction } from '@kit.ArkUI';
 import { AppTheme } from '../common/AppTheme';
 import { Outline, TranscriptSegment } from '../model/Models';
 import { Api } from '../service/Api';
+import { RecordingStore, RecordingDraft } from '../service/RecordingStore';
 import { GlobalState } from '../service/GlobalState';
+
+interface PendingChunk { seq: number; }
 
 type RecordState = 'idle' | 'recording' | 'paused' | 'finished';
 
@@ -22,11 +25,16 @@ const RECORD_BORDER: string = 'rgba(255,255,255,0.92)';
 /**
  * 课堂录音（Notein 风）：左侧居中大计时 + 圆形录制按钮，右侧转写浮岛。
  * AudioCapturer 采集 → 分片上传 → 云端 ASR 转写实时回显；
- * 无麦克风权限/初始化失败自动降级「模拟模式」。
+ * 麦克风初始化失败明确报错，未上传分片保存到应用私有目录。
  */
 @Component
 export struct RecordPage {
   @StorageLink('classSubPage') classSubPage: string = 'record';
+  @StorageLink('recordingActive') recordingActive: boolean = false;
+  @State controlling: boolean = false;
+  private uploadQueue: PendingChunk[] = [];
+  private recordingStore: RecordingStore | null = null;
+  private uploadPromise: Promise<void> | null = null;
   @State recordState: RecordState = 'idle';
   @State title: string = '';
   @State elapsedSec: number = 0;
@@ -38,6 +46,8 @@ export struct RecordPage {
   @State savingOutline: boolean = false;
   @State publishingOutline: boolean = false;
   @State simulated: boolean = false;
+  @State compact: boolean = false;
+  @State compactTab: string = 'transcript';
   @State uploadFailures: number = 0;
   @State waveFrame: number = 0;
   private sessionId: number = -1;
@@ -50,6 +60,21 @@ export struct RecordPage {
   private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
+    try {
+      const context = getContext(this) as common.UIAbilityContext;
+      this.recordingStore = new RecordingStore(context.filesDir, Api.BASE_URL, GlobalState.userId(), GlobalState.courseId());
+      const draft = this.recordingStore.load();
+      if (draft !== null) {
+        this.sessionId = draft.sessionId;
+        this.title = draft.title;
+        const pending = this.recordingStore.pending();
+        this.seq = Math.max(draft.nextSeq, pending.length > 0 ? pending[pending.length - 1] + 1 : 0);
+        this.uploadQueue = pending.map((seq: number): PendingChunk => { return { seq: seq }; });
+        this.recordState = 'paused';
+        this.recordingActive = true;
+        this.toast('已恢复未完成录音，点击结束继续保存');
+      }
+    } catch (e) { this.toast(`录音缓存不可用：${(e as Error).message}`); }
     if (this.title === '') {
       this.title = this.defaultTitle();
     }
@@ -58,6 +83,10 @@ export struct RecordPage {
   aboutToDisappear(): void {
     this.stopTimers();
     this.releaseCapturer();
+    if (this.recordState === 'recording' || this.recordState === 'paused') {
+      try { this.cacheBuffers(); } catch (e) { this.toast((e as Error).message); }
+    }
+    this.recordingActive = false;
   }
 
   private toast(msg: string): void {
@@ -85,8 +114,13 @@ export struct RecordPage {
 
   // ---------- 录音控制（与后端联动） ----------
   private async start(): Promise<void> {
+    if (this.controlling || this.recordingActive) { return; }
+    this.controlling = true;
+    this.recordingActive = true;
     if (GlobalState.course === null) {
       this.toast('请先选择课程');
+      this.controlling = false;
+      this.recordingActive = false;
       return;
     }
     interface CreateBody {
@@ -107,14 +141,28 @@ export struct RecordPage {
 
       const resp: SessionResp = JSON.parse(await Api.post('/sessions', body)) as SessionResp;
       this.sessionId = resp.id;
+      if (this.recordingStore === null) { throw new Error('录音缓存不可用'); }
+      const draft: RecordingDraft = { sessionId: this.sessionId, title: this.title, nextSeq: 0 };
+      this.recordingStore.save(draft);
     } catch (e) {
       this.toast(`创建课时失败：${(e as Error).message}`);
+      this.controlling = false;
+      this.recordingActive = false;
       return;
     }
 
-    await this.initCapturer();
-    this.recordState = 'recording';
-    this.startTimers();
+    try {
+      await this.initCapturer();
+      this.recordState = 'recording';
+      this.startTimers();
+    } catch (e) {
+      this.releaseCapturer();
+      try { await Api.remove(`/sessions/${this.sessionId}`); } catch (cleanup) {}
+      try { this.recordingStore?.finish(); } catch (cleanup) {}
+      this.sessionId = -1;
+      this.recordingActive = false;
+      this.toast((e as Error).message);
+    } finally { this.controlling = false; }
   }
 
   private async initCapturer(): Promise<void> {
@@ -125,9 +173,7 @@ export struct RecordPage {
       const result = await atManager.requestPermissionsFromUser(ctx, perms);
       const granted: boolean = result.authResults.length > 0 && result.authResults[0] === 0;
       if (!granted) {
-        this.simulated = true;
-        this.toast('未授予麦克风权限，进入模拟模式');
-        return;
+        throw new Error('未授予麦克风权限');
       }
       const options: audio.AudioCapturerOptions = {
         streamInfo: {
@@ -148,8 +194,7 @@ export struct RecordPage {
       await this.capturer.start();
       this.simulated = false;
     } catch (e) {
-      this.simulated = true;
-      this.toast('麦克风初始化失败，进入模拟模式');
+      throw new Error(`麦克风初始化失败：${(e as Error).message}`);
     }
   }
 
@@ -196,7 +241,7 @@ export struct RecordPage {
     if (this.capturer !== null) {
       const c: audio.AudioCapturer = this.capturer;
       this.capturer = null;
-      c.release();
+      c.release().catch(() => {});
     }
   }
 
@@ -208,7 +253,7 @@ export struct RecordPage {
       total += b.byteLength;
     }
     if (total === 0) {
-      return new Uint8Array([0, 0, 0, 0]).buffer;
+      return new ArrayBuffer(0);
     }
     const out: Uint8Array = new Uint8Array(total);
     let offset: number = 0;
@@ -219,57 +264,94 @@ export struct RecordPage {
     return out.buffer;
   }
 
-  private async flushChunk(): Promise<void> {
-    if (this.sessionId < 0) {
-      return;
+  private cacheBuffers(): void {
+    if (this.sessionId < 0) { return; }
+    if (this.recordingStore === null) { throw new Error('录音缓存不可用'); }
+    const data = this.mergeBuffers();
+    const maxBytes: number = 128000;
+    for (let offset = 0; offset < data.byteLength; offset += maxBytes) {
+      try {
+        this.recordingStore.append(this.seq, data.slice(offset, Math.min(offset + maxBytes, data.byteLength)));
+        this.uploadQueue.push({ seq: this.seq++ });
+      } catch (e) { this.pendingBuffers.unshift(data.slice(offset)); throw new Error((e as Error).message); }
     }
-    const data: ArrayBuffer = this.mergeBuffers();
-    const currentSeq: number = this.seq;
-    this.seq += 1;
-    try {
-      const seg: TranscriptSegment =
-        JSON.parse(await Api.uploadChunk(this.sessionId, currentSeq, data)) as TranscriptSegment;
-      this.segments.push(seg);
-      this.scroller.scrollEdge(Edge.Bottom);
-    } catch (e) {
-      this.uploadFailures += 1;
-      if (this.uploadFailures === 1) {
-        this.toast(`语音转写失败：${(e as Error).message}`);
+    const draft: RecordingDraft = { sessionId: this.sessionId, title: this.title, nextSeq: this.seq };
+    this.recordingStore.save(draft);
+  }
+
+  private async flushChunk(): Promise<void> {
+    try { this.cacheBuffers(); }
+    catch (e) { this.toast((e as Error).message); return; }
+    if (this.uploadPromise !== null) { return this.uploadPromise; }
+    this.uploadPromise = this.drainUploads();
+    await this.uploadPromise;
+    this.uploadPromise = null;
+  }
+
+  private async drainUploads(): Promise<void> {
+    const token = Api.token;
+    while (this.uploadQueue.length > 0) {
+      if (Api.token !== token || token === '') { return; }
+      const chunk = this.uploadQueue[0];
+      try {
+        if (this.recordingStore === null) { throw new Error('录音缓存不可用'); }
+        const segment = JSON.parse(await Api.uploadChunk(this.sessionId, chunk.seq, this.recordingStore.read(chunk.seq))) as TranscriptSegment;
+        this.recordingStore.remove(chunk.seq);
+        this.uploadQueue.shift();
+        this.segments = this.segments.concat([segment]);
+        this.uploadFailures = 0;
+      } catch (e) {
+        this.uploadFailures = this.uploadQueue.length;
+        this.toast(`分片上传失败，已保留待重试：${(e as Error).message}`);
+        return;
       }
     }
   }
 
   private async pauseOrResume(): Promise<void> {
-    if (this.recordState === 'recording') {
-      this.recordState = 'paused';
-      this.stopTimers();
-      if (this.capturer !== null) {
+    if (this.controlling) { return; }
+    this.controlling = true;
+    try {
+      if (this.capturer === null) { throw new Error('录音设备不可用'); }
+      if (this.recordState === 'recording') {
         await this.capturer.stop();
-      }
-    } else if (this.recordState === 'paused') {
-      this.recordState = 'recording';
-      this.startTimers();
-      if (this.capturer !== null) {
+        this.recordState = 'paused';
+        this.stopTimers();
+        await this.flushChunk();
+      } else if (this.recordState === 'paused') {
         await this.capturer.start();
+        this.recordState = 'recording';
+        this.startTimers();
       }
-    }
+    } catch (e) { this.toast((e as Error).message); }
+    finally { this.controlling = false; }
   }
 
   private async finish(): Promise<void> {
+    if (this.controlling || this.sessionId < 0) { return; }
+    this.controlling = true;
     this.stopTimers();
-    await this.flushChunk();
-    this.releaseCapturer();
     try {
+      if (this.capturer !== null && this.recordState === 'recording') { await this.capturer.stop(); }
+      this.recordState = 'paused';
+      await this.flushChunk();
+      if (this.uploadQueue.length > 0 || this.pendingBuffers.length > 0) { throw new Error('仍有未上传的分片，请再次点击结束以重试'); }
       await Api.post(`/sessions/${this.sessionId}/finish`);
-    } catch (e) {
-      // 网络异常不阻塞收尾
-    }
-    this.recordState = 'finished';
-    GlobalState.currentSessionId = this.sessionId;
-    this.toast('录音结束，转写已保存，可在此生成提纲');
+      this.recordingStore?.finish();
+      this.releaseCapturer();
+      this.recordState = 'finished';
+      this.recordingActive = false;
+      GlobalState.currentSessionId = this.sessionId;
+      try {
+        this.segments = JSON.parse(await Api.get(`/sessions/${this.sessionId}/transcript`)) as TranscriptSegment[];
+      } catch (e) { this.toast('录音已保存，转写列表暂未刷新'); }
+      this.toast('录音及转写已保存');
+    } catch (e) { this.toast((e as Error).message); }
+    finally { this.controlling = false; }
   }
 
   private prepareNextRecording(): void {
+    if (this.recordingActive || this.controlling) { return; }
     this.stopTimers();
     this.releaseCapturer();
     this.recordState = 'idle';
@@ -287,6 +369,8 @@ export struct RecordPage {
     this.sessionId = -1;
     this.seq = 0;
     this.pendingBuffers = [];
+    this.uploadQueue = [];
+    this.uploadPromise = null;
   }
 
   private async generateOutline(): Promise<void> {
@@ -324,7 +408,7 @@ export struct RecordPage {
         `/sessions/${this.sessionId}/outline?user_id=${GlobalState.userId()}`, body)) as Outline;
       this.outlineText = this.outlineData.markdown;
       this.outlineDirty = false;
-      this.toast(GlobalState.isTeacher() ? '官方草稿已保存' : '已保存到我的课堂');
+      this.toast(GlobalState.canManageCurrentCourse() ? '官方草稿已保存' : '已保存到我的课堂');
       return true;
     } catch (e) {
       this.toast(`保存失败：${(e as Error).message}`);
@@ -654,7 +738,7 @@ export struct RecordPage {
           .onClick(() => {
             this.saveOutline();
           })
-        if (GlobalState.isTeacher()) {
+        if (GlobalState.canManageCurrentCourse()) {
           Button(this.publishingOutline ? '发布中…' : '发布')
             .layoutWeight(1)
             .enabled(!this.publishingOutline && this.outlineText.trim() !== '' &&
@@ -676,8 +760,51 @@ export struct RecordPage {
     .border({ width: 1.2, color: RECORD_BORDER })
   }
 
+  @Builder
+  compactWorkspace() {
+    Column({ space: 10 }) {
+      Row() {
+        this.backButton()
+        Blank()
+        this.statusPill()
+      }.width('100%')
+      TextInput({ text: this.title, placeholder: '课时标题' }).enabled(this.recordState === 'idle')
+        .onChange((value: string) => { this.title = value; })
+      Row({ space: 16 }) {
+        Text(this.fmtDuration()).fontSize(28).fontWeight(FontWeight.Bold).layoutWeight(1)
+        if (this.recordState === 'idle') {
+          Button('开始录音').backgroundColor(AppTheme.PRIMARY).enabled(!this.controlling).onClick(() => { this.start(); })
+        } else if (this.recordState === 'recording' || this.recordState === 'paused') {
+          Button(this.recordState === 'recording' ? '暂停' : '继续').enabled(!this.controlling).onClick(() => { this.pauseOrResume(); })
+          Button('结束').backgroundColor(AppTheme.DANGER).enabled(!this.controlling).onClick(() => { this.finish(); })
+        } else {
+          Button('新录音').backgroundColor(AppTheme.PRIMARY).onClick(() => { this.prepareNextRecording(); })
+        }
+      }.width('100%')
+      if (this.uploadFailures > 0) { Text(`${this.uploadFailures} 个分片待上传`).fontColor(AppTheme.DANGER).fontSize(13) }
+      Row({ space: 8 }) {
+        Button('转写').layoutWeight(1).backgroundColor(this.compactTab === 'transcript' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
+          .onClick(() => { this.compactTab = 'transcript'; })
+        if (this.recordState === 'finished') {
+          Button('提纲').layoutWeight(1).backgroundColor(this.compactTab === 'outline' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
+            .onClick(() => { this.compactTab = 'outline'; })
+        }
+      }.width('100%')
+      if (this.compactTab === 'outline' && this.recordState === 'finished') {
+        this.outlinePanel()
+      } else {
+        List({ space: 12 }) {
+          ForEach(this.segments, (segment: TranscriptSegment) => {
+            ListItem() { Text(segment.text).width('100%').fontSize(15).padding(12).backgroundColor('#FFFFFF') }
+          }, (segment: TranscriptSegment) => `${segment.seq}`)
+        }.width('100%').layoutWeight(1)
+      }
+    }.width('100%').height('100%').padding(16).backgroundColor(RECORD_BG)
+  }
+
   build() {
     Stack() {
+      if (this.compact) { this.compactWorkspace() } else {
       this.recordAtmosphere()
 
       Column({ space: AppTheme.SPACE_L }) {
@@ -832,7 +959,7 @@ export struct RecordPage {
           }
           .alignItems(HorizontalAlign.Start)
           Blank()
-          Text(this.simulated ? '模拟模式' : '云端 ASR')
+          Text(this.simulated ? '模拟模式' : '语音识别')
             .fontSize(AppTheme.FONT_CAPTION)
             .fontColor(this.simulated ? AppTheme.WARNING : AppTheme.PRIMARY)
             .padding({ left: 12, right: 12, top: 5, bottom: 5 })
@@ -859,7 +986,7 @@ export struct RecordPage {
               .width(120)
               .height(112)
               Text(this.recordState === 'idle' ?
-                '开始录音后，云端转写文字将在此实时显示' : '等待首个分片转写…')
+                '开始录音后，转写文字将在此显示' : '等待首个分片转写…')
                 .fontSize(AppTheme.FONT_BODY)
                 .fontColor(AppTheme.TEXT_TERTIARY)
             }
@@ -917,9 +1044,11 @@ export struct RecordPage {
       .width('100%')
       .height('100%')
       .padding({ left: AppTheme.SPACE_XXL, right: AppTheme.SPACE_XXL, top: 28, bottom: AppTheme.SPACE_XXL })
+      }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(RECORD_BG)
+    .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 1000 || Number(newArea.height) < 560; })
   }
 }

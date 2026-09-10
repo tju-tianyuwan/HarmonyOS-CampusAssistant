@@ -132,8 +132,8 @@ class CourseWorkspaceStatsTest(unittest.TestCase):
             )
             db.commit()
 
-            stats_a = course_workspace_stats(course_a.id, student.id, Response(), db)
-            stats_b = course_workspace_stats(course_b.id, student.id, Response(), db)
+            stats_a = course_workspace_stats(course_a.id, student.id, Response(), db, student)
+            stats_b = course_workspace_stats(course_b.id, student.id, Response(), db, student)
 
             self.assertEqual(stats_a.official_lesson_count, 1)
             self.assertEqual(stats_a.personal_note_count, 2)
@@ -152,8 +152,8 @@ class CourseWorkspaceStatsTest(unittest.TestCase):
             )
             db.commit()
 
-            refreshed_a = course_workspace_stats(course_a.id, student.id, Response(), db)
-            refreshed_b = course_workspace_stats(course_b.id, student.id, Response(), db)
+            refreshed_a = course_workspace_stats(course_a.id, student.id, Response(), db, student)
+            refreshed_b = course_workspace_stats(course_b.id, student.id, Response(), db, student)
             self.assertEqual(refreshed_a.class_note_count, 2)
             self.assertEqual(refreshed_b.class_note_count, 1)
 
@@ -177,7 +177,7 @@ class CourseWorkspaceStatsTest(unittest.TestCase):
 
             response = Response()
             with self.assertRaises(HTTPException) as raised:
-                course_workspace_stats(course.id, outsider.id, response, db)
+                course_workspace_stats(course.id, outsider.id, response, db, outsider)
 
             self.assertEqual(raised.exception.status_code, 403)
             self.assertEqual(response.headers["Cache-Control"], "no-store")

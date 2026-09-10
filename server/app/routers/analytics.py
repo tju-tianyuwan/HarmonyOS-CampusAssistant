@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from ..db import get_db
-from ..models import ClassCourse, KeywordStat, QuestionLog
+from ..models import ClassCourse, KeywordStat, QuestionLog, User
+from ..services.security import current_user, same_user, manager
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -48,9 +49,11 @@ def _level(heat: int, missed_count: int) -> str:
 
 
 @router.get("/classroom", response_model=ClassroomAnalytics)
-def classroom_analytics(class_course_id: int, user_id: int, limit: int = 8, db: Session = Depends(get_db)):
+def classroom_analytics(class_course_id: int, user_id: int, limit: int = 8, db: Session = Depends(get_db),
+                        user: User = Depends(current_user)):
     """教师端课堂疑问洞察：高频关键词、典例、知识库未命中和疑惑热区。"""
-    cc = db.get(ClassCourse, class_course_id)
+    same_user(user, user_id)
+    cc = manager(db, user, class_course_id)
     if not cc:
         raise HTTPException(404, "课程不存在")
     if cc.teacher_id != user_id:
