@@ -1,5 +1,6 @@
+import { TouchMotion } from '../common/TouchMotion';
 import { promptAction } from '@kit.ArkUI';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { HandwritingBoard } from '../common/components/HandwritingBoard';
 import { Note } from '../model/Models';
 import { Api } from '../service/Api';
@@ -13,6 +14,7 @@ import { transferService, TransferNote } from '../service/collab/TransferService
  */
 @Component
 export struct HandwritingNotePage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
   onBack: () => void = () => {
   };
   initialNoteId: number = -1;
@@ -108,6 +110,7 @@ export struct HandwritingNotePage {
 
   private async loadNotes(selectFirst: boolean): Promise<void> {
     try {
+      const targetNoteId: number = this.initialNoteId >= 0 ? this.initialNoteId : GlobalState.pendingOpenNoteId;
       const all: Note[] = JSON.parse(await Api.get(
         `/notes?class_course_id=${GlobalState.courseId()}&user_id=${GlobalState.userId()}`)) as Note[];
       if (this.readOnly && this.initialNoteId >= 0) {
@@ -116,13 +119,15 @@ export struct HandwritingNotePage {
       } else {
         this.notes = all.filter((n: Note) => n.owner_id === GlobalState.userId() && n.kind === 'handwriting');
       }
-      if (this.initialNoteId >= 0) {
+      if (targetNoteId >= 0) {
         for (let i = 0; i < this.notes.length; i++) {
-          if (this.notes[i].id === this.initialNoteId) {
+          if (this.notes[i].id === targetNoteId) {
             this.selectNote(i);
+            GlobalState.pendingOpenNoteId = -1;
             return;
           }
         }
+        GlobalState.pendingOpenNoteId = -1;
       }
       if (selectFirst && this.notes.length > 0) {
         this.selectNote(0);
@@ -157,6 +162,7 @@ export struct HandwritingNotePage {
   private async createNote(kind: string): Promise<void> {
     interface NoteBody {
       class_course_id: number;
+      session_id: number | null;
       owner_id: number;
       title: string;
       kind: string;
@@ -165,6 +171,7 @@ export struct HandwritingNotePage {
 
     const body: NoteBody = {
       class_course_id: GlobalState.courseId(),
+      session_id: GlobalState.pendingNoteSessionId >= 0 ? GlobalState.pendingNoteSessionId : null,
       owner_id: GlobalState.userId(),
       title: '新手写笔记',
       kind: kind,
@@ -172,6 +179,7 @@ export struct HandwritingNotePage {
     };
     try {
       const created: Note = JSON.parse(await Api.post('/notes', body)) as Note;
+      GlobalState.pendingNoteSessionId = -1;
       await this.loadNotes(false);
       if (!this.selectNoteById(created.id) && this.notes.length > 0) {
         this.selectNote(this.notes.length - 1);
@@ -328,7 +336,12 @@ export struct HandwritingNotePage {
     if (this.compact) {
       Column({ space: 6 }) {
         Row({ space: 8 }) {
-          Button('返回').backgroundColor(AppTheme.PRIMARY_LIGHT).fontColor(AppTheme.PRIMARY_DEEP).onClick(() => { this.leave(this.onBack); })
+          Button('返回').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).backgroundColor(AppTheme.PRIMARY_LIGHT).fontColor(AppTheme.PRIMARY_DEEP).onClick(() => { this.leave(this.onBack); })
           TextInput({ text: this.noteTitle, placeholder: '笔记标题' }).layoutWeight(1).enabled(this.canEditCurrent())
             .onChange((value: string) => { if (value !== this.noteTitle) { this.noteTitle = value; this.dirty = true; this.cacheDraft(); } })
         }.width('100%')
@@ -336,9 +349,24 @@ export struct HandwritingNotePage {
           if (this.dirty) { Text('未保存').fontSize(12).fontColor(AppTheme.WARNING) }
           Blank()
           if (this.canEditCurrent()) {
-            Button('保存').backgroundColor(AppTheme.PRIMARY).enabled(!this.saving && !this.sharing).onClick(() => { this.saveNote(); })
-            Button('删除').fontColor(AppTheme.DANGER).backgroundColor(Color.Transparent).enabled(!this.saving && !this.sharing).onClick(() => { this.deleteCurrentNote(); })
-            Button(this.current()?.visibility === 'private' ? '共享' : '取消共享').backgroundColor(AppTheme.PRIMARY_LIGHT)
+            Button('保存').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).backgroundColor(AppTheme.PRIMARY).enabled(!this.saving && !this.sharing).onClick(() => { this.saveNote(); })
+            Button('删除').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).fontColor(AppTheme.DANGER).backgroundColor(Color.Transparent).enabled(!this.saving && !this.sharing).onClick(() => { this.deleteCurrentNote(); })
+            Button(this.current()?.visibility === 'private' ? '共享' : '取消共享').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).backgroundColor(AppTheme.PRIMARY_LIGHT)
               .fontColor(AppTheme.PRIMARY_DEEP).enabled(!this.saving && !this.sharing).onClick(() => { this.toggleShare(); })
           } else { Text('只读').fontSize(13) }
         }.width('100%')
@@ -378,7 +406,12 @@ export struct HandwritingNotePage {
       }
 
       if (this.canEditCurrent()) {
-        Button('重命名')
+        Button('重命名').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .fontSize(AppTheme.FONT_BODY)
           .height(40)
           .backgroundColor('rgba(255,255,255,0.76)')
@@ -387,7 +420,12 @@ export struct HandwritingNotePage {
           .onClick(() => {
             this.renameNote();
           })
-        Button('保存')
+        Button('保存').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .enabled(!this.saving && !this.sharing)
           .fontSize(AppTheme.FONT_BODY)
           .height(40)
@@ -396,7 +434,12 @@ export struct HandwritingNotePage {
           .onClick(() => {
             this.saveNote();
           })
-        Button('删除')
+        Button('删除').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .enabled(!this.saving && !this.sharing)
           .fontSize(AppTheme.FONT_BODY)
           .height(40)
@@ -407,7 +450,12 @@ export struct HandwritingNotePage {
             this.deleteCurrentNote();
           })
         Button(this.sharing ? '…' :
-          (this.current() !== null && this.current()!.visibility === 'private' ? '共享' : '取消共享'))
+          (this.current() !== null && this.current()!.visibility === 'private' ? '共享' : '取消共享')).stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .fontSize(AppTheme.FONT_BODY)
           .height(40)
           .enabled(!this.sharing && !this.saving)
@@ -481,7 +529,12 @@ export struct HandwritingNotePage {
         Text('请从个人笔记页面选择手写笔记，或点击 + 创建新手写笔记')
           .fontSize(AppTheme.FONT_CAPTION)
           .fontColor(AppTheme.TEXT_TERTIARY)
-        Button('返回个人笔记')
+        Button('返回个人笔记').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .fontSize(AppTheme.FONT_BODY)
           .backgroundColor(AppTheme.PRIMARY)
           .borderRadius(999)
@@ -506,10 +559,9 @@ export struct HandwritingNotePage {
       this.emptyState()
     } else {
       Column() {
-        if (this.compact) { this.floatingToolbar() }
+        this.floatingToolbar()
         Stack({ alignContent: Alignment.TopStart }) {
         this.handwritingBoardLayer()
-        if (!this.compact) { this.floatingToolbar() }
         }.width('100%').layoutWeight(1)
       }
       .width('100%')

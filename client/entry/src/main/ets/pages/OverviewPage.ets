@@ -1,6 +1,8 @@
+import { TouchMotion } from '../common/TouchMotion';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
+import { MobileLayout } from '../common/MobileLayout';
 import { CourseWorkspaceStats } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
@@ -25,6 +27,7 @@ const VIOLET: string = '#7A63F3';
  */
 @Component
 export struct OverviewPage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
   @StorageLink('currentTab') @Watch('onCurrentTabChanged') currentTab: string = 'overview';
   @StorageLink('classSubPage') classSubPage: string = 'list';
   @StorageLink('noteSubPage') noteSubPage: string = 'hub';
@@ -50,8 +53,9 @@ export struct OverviewPage {
 
   aboutToAppear(): void {
     this.startStatsSync();
-    this.startIntro();
-    this.startAtlasMotion();
+    this.pageReady = true;
+    this.statsReady = true;
+    this.entriesReady = true;
   }
 
   aboutToDisappear(): void {
@@ -207,6 +211,11 @@ export struct OverviewPage {
     GlobalState.updateSnapshot('practice');
   }
 
+  private openMeetingPage(): void {
+    this.currentTab = 'ai_meeting';
+    GlobalState.updateSnapshot('ai_meeting');
+  }
+
   private openNotesPage(): void {
     this.noteSubPage = 'hub';
     this.currentTab = 'notes';
@@ -214,6 +223,10 @@ export struct OverviewPage {
   }
 
   private openRecordPage(): void {
+    if (!GlobalState.isTeacher()) {
+      this.openAiPage();
+      return;
+    }
     this.classSubPage = 'record';
     this.currentTab = 'class';
     GlobalState.updateSnapshot('class');
@@ -350,17 +363,9 @@ export struct OverviewPage {
     .width(size)
     .height(size)
     .position({ x: x, y: y })
-    .scale({
-      x: this.pressedAtlasNode === target ? 0.94 : (active && this.atlasPulse ? 1.05 : 1),
-      y: this.pressedAtlasNode === target ? 0.94 : (active && this.atlasPulse ? 1.05 : 1)
-    })
-    .animation({ duration: this.pressedAtlasNode === target ? 90 : 800, curve: Curve.EaseOut })
-    .onTouch((event: TouchEvent) => {
-      if (event.type === TouchType.Down) {
-        this.pressedAtlasNode = target;
-      } else if (event.type === TouchType.Up) {
-        this.pressedAtlasNode = '';
-      }
+    .stateStyles({
+      normal: { .scale({ x: 1, y: 1 }).animation(TouchMotion.release(this.reduceMotion)) },
+      pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'icon')).animation(TouchMotion.press(this.reduceMotion)) }
     })
     .onClick(() => {
       this.pressedAtlasNode = '';
@@ -382,14 +387,18 @@ export struct OverviewPage {
         .fontWeight(FontWeight.Bold)
         .fontColor('rgba(255,255,255,0.74)')
         .position({ x: 28, y: 24 })
-      Text('从录音到思考，再到 AI 与笔记')
+      Text(GlobalState.isTeacher() ? '从录音到思考，再到 AI 与笔记' : '从每节课程出发，连接讨论、笔记、练习与 AI')
         .fontSize(11)
         .fontColor('rgba(255,255,255,0.48)')
         .position({ x: 28, y: 45 })
       this.graphEdge(61, 16.7, 148, 144, 'rgba(18,191,232,0.48)')
       this.graphEdge(55, -22.7, 257, 139, 'rgba(5,206,145,0.46)')
       this.graphEdge(50, 40.8, 361, 154, 'rgba(122,99,243,0.42)')
-      this.graphNode('录', 'CAPTURE', CYAN, 56, 94, 64, true, 'capture')
+      if (GlobalState.isTeacher()) {
+        this.graphNode('录', 'CAPTURE', CYAN, 56, 94, 64, true, 'capture')
+      } else {
+        this.graphNode('课', 'COURSE', CYAN, 56, 94, 64, true, 'outline')
+      }
       this.graphNode('思', 'THINK', AMBER, 176, 132, 58, this.officialLessonCount > 0 || this.atlasPulse,
         'outline')
       this.graphNode('问', 'AI', BLUE, 280, 80, 70, true, 'ai')
@@ -448,14 +457,9 @@ export struct OverviewPage {
       offsetX: 0,
       offsetY: this.invitePressed ? 4 : 9
     })
-    .scale({ x: this.invitePressed ? 0.97 : 1, y: this.invitePressed ? 0.97 : 1 })
-    .animation({ duration: 130, curve: Curve.EaseOut })
-    .onTouch((event: TouchEvent) => {
-      if (event.type === TouchType.Down) {
-        this.invitePressed = true;
-      } else if (event.type === TouchType.Up) {
-        this.invitePressed = false;
-      }
+    .stateStyles({
+      normal: { .scale({ x: 1, y: 1 }).animation(TouchMotion.release(this.reduceMotion)) },
+      pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) }
     })
     .onClick(() => {
       this.invitePressed = false;
@@ -733,19 +737,9 @@ export struct OverviewPage {
       offsetX: 0,
       offsetY: this.pressedEntry === 'practiceBanner' ? 6 : 12
     })
-    .opacity(this.entriesReady ? 1 : 0)
-    .translate({ x: 0, y: this.entriesReady ? (this.pressedEntry === 'practiceBanner' ? 3 : 0) : 24 })
-    .scale({
-      x: this.pressedEntry === 'practiceBanner' ? 0.986 : (this.entriesReady ? 1 : 0.99),
-      y: this.pressedEntry === 'practiceBanner' ? 0.986 : (this.entriesReady ? 1 : 0.99)
-    })
-    .animation({ duration: this.pressedEntry === 'practiceBanner' ? 90 : 360, curve: Curve.EaseOut })
-    .onTouch((event: TouchEvent) => {
-      if (event.type === TouchType.Down) {
-        this.pressedEntry = 'practiceBanner';
-      } else if (event.type === TouchType.Up) {
-        this.pressedEntry = '';
-      }
+    .stateStyles({
+      normal: { .translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+      pressed: { .translate(TouchMotion.pressedOffset(this.reduceMotion, 'card')).animation(TouchMotion.press(this.reduceMotion)) }
     })
     .onClick(() => {
       this.pressedEntry = '';
@@ -1079,19 +1073,9 @@ export struct OverviewPage {
       offsetX: 0,
       offsetY: this.pressedEntry === key ? 7 : 14
     })
-    .opacity(this.entriesReady ? 1 : 0)
-    .translate({ x: 0, y: this.entriesReady ? (this.pressedEntry === key ? 4 : 0) : 28 })
-    .scale({
-      x: this.pressedEntry === key ? 0.976 : (this.entriesReady ? 1 : 0.985),
-      y: this.pressedEntry === key ? 0.976 : (this.entriesReady ? 1 : 0.985)
-    })
-    .animation({ duration: this.pressedEntry === key ? 90 : 380, curve: Curve.EaseOut })
-    .onTouch((event: TouchEvent) => {
-      if (event.type === TouchType.Down) {
-        this.pressedEntry = key;
-      } else if (event.type === TouchType.Up) {
-        this.pressedEntry = '';
-      }
+    .stateStyles({
+      normal: { .translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+      pressed: { .translate(TouchMotion.pressedOffset(this.reduceMotion, 'card')).animation(TouchMotion.press(this.reduceMotion)) }
     })
     .onClick(() => {
       this.pressedEntry = '';
@@ -1099,53 +1083,145 @@ export struct OverviewPage {
     })
   }
 
+  @Builder
+  studentEntryCard(key: string, title: string, desc: string, accent: string, symbol: string, onTap: () => void) {
+    Row({ space: 16 }) {
+      SymbolGlyph(key === 'class' ? $r('sys.symbol.folder') : key === 'meeting' ? $r('sys.symbol.person_2') :
+        key === 'notes' ? $r('sys.symbol.doc_text') : $r('sys.symbol.checkmark'))
+        .fontSize(22).fontColor([AppTheme.PRIMARY]).width(44).height(44)
+        .borderRadius(12).backgroundColor(AppTheme.PRIMARY_LIGHT)
+      Column({ space: 5 }) {
+        Text(title).fontSize(17).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK)
+        Text(desc).fontSize(12).fontColor(AppTheme.TEXT_TERTIARY).maxLines(2)
+      }.alignItems(HorizontalAlign.Start).layoutWeight(1)
+      SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([AppTheme.TEXT_TERTIARY])
+    }.width('100%').height(this.compact ? 88 : 108).padding(16).borderRadius(16).backgroundColor(AppTheme.BG_CARD)
+      .border({ width: 1, color: AppTheme.DIVIDER })
+      .onClick(() => { onTap(); })
+  }
+
+  @Builder
+  studentHome() {
+    Scroll() {
+      Column({ space: 20 }) {
+        Column({ space: 10 }) {
+          Text(GlobalState.course?.name ?? '课程概览').fontSize(this.compact ? 28 : 34)
+            .fontWeight(FontWeight.Bold).fontColor(AppTheme.INK).width('100%')
+          Text(`${GlobalState.course?.class_name ?? ''} · ${GlobalState.course?.teacher_name ?? ''}`)
+            .fontSize(14).fontColor(AppTheme.TEXT_SECONDARY).width('100%')
+          if (GlobalState.course?.invite_code) {
+            Button(`邀请码 ${GlobalState.course?.invite_code}`).stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).fontSize(12).height(36)
+              .fontColor(AppTheme.PRIMARY).backgroundColor(AppTheme.PRIMARY_LIGHT).borderRadius(8)
+              .onClick(() => { this.copyInvite(); })
+          }
+        }.width('100%').alignItems(HorizontalAlign.Start).padding({ top: 8, bottom: 4 })
+        Row({ space: 12 }) {
+          Column({ space: 6 }) {
+            Text(`${this.officialLessonCount}`).fontSize(24).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK)
+            Text('官方课时').fontSize(12).fontColor(AppTheme.TEXT_SECONDARY)
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+          Column({ space: 6 }) {
+            Text(`${this.classNoteCount}`).fontSize(24).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK)
+            Text('班级笔记').fontSize(12).fontColor(AppTheme.TEXT_SECONDARY)
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+          Column({ space: 6 }) {
+            Text(`${this.personalNoteCount}`).fontSize(24).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK)
+            Text('个人笔记').fontSize(12).fontColor(AppTheme.TEXT_SECONDARY)
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        }.width('100%').padding({ top: 16, bottom: 20 }).border({ width: { bottom: 1 }, color: AppTheme.DIVIDER })
+        if (this.compact) {
+          Column({ space: 10 }) {
+            this.studentEntryCard('class', '课程', '课次与资料', AppTheme.PRIMARY, '课', () => { this.openClassPage(); })
+            this.studentEntryCard('meeting', 'AI学习小组', '讨论与学习总结', AppTheme.PRIMARY, '学', () => { this.openMeetingPage(); })
+            this.studentEntryCard('notes', '笔记', '班级笔记与个人笔记', AppTheme.PRIMARY, '记', () => { this.openNotesPage(); })
+            this.studentEntryCard('practice', '刷题', '根据课程内容巩固练习', AppTheme.PRIMARY, '练', () => { this.openPracticePage(); })
+          }.width('100%')
+        } else {
+          Row({ space: 16 }) {
+            Column() { this.studentEntryCard('class', '课程', '课次与资料', AppTheme.PRIMARY, '课', () => { this.openClassPage(); }) }.layoutWeight(1)
+            Column() { this.studentEntryCard('meeting', 'AI学习小组', '讨论与学习总结', AppTheme.PRIMARY, '学', () => { this.openMeetingPage(); }) }.layoutWeight(1)
+          }.width('100%')
+          Row({ space: 16 }) {
+            Column() { this.studentEntryCard('notes', '笔记', '班级笔记与个人笔记', AppTheme.PRIMARY, '记', () => { this.openNotesPage(); }) }.layoutWeight(1)
+            Column() { this.studentEntryCard('practice', '刷题', '根据课程内容巩固练习', AppTheme.PRIMARY, '练', () => { this.openPracticePage(); }) }.layoutWeight(1)
+          }.width('100%')
+        }
+      }.width('100%').constraintSize({ maxWidth: 1000 }).padding(this.compact ? 20 : 32)
+    }.width('100%').height('100%').align(Alignment.Top)
+  }
+
+  @Builder
+  teacherHomeEntry(title: string, icon: Resource, accent: string, target: string) {
+    Row({ space: 16 }) {
+      SymbolGlyph(icon).fontSize(28).fontColor([accent])
+      Text(title).fontSize(20).fontWeight(FontWeight.Medium).layoutWeight(1)
+      SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([AppTheme.TEXT_TERTIARY])
+    }.width('100%').height(100).padding(20).borderRadius(8).backgroundColor('#FFFFFF')
+      .enabled(target !== 'materials' || GlobalState.canManageCurrentCourse())
+      .onClick(() => {
+        if (target === 'class') { this.openClassPage(); }
+        else if (target === 'course_ai') { this.openAiPage(); }
+        else if (target === 'ai_meeting') { this.openMeetingPage(); }
+        else { this.currentTab = 'materials'; GlobalState.updateSnapshot('materials'); }
+      })
+  }
+
+  @Builder
+  teacherHome() {
+    Scroll() {
+      Column({ space: 20 }) {
+        Row({ space: 12 }) {
+          Image($r('app.media.app_icon')).width(44).height(44).borderRadius(8)
+          Column({ space: 8 }) {
+            Text(GlobalState.course?.name ?? '课程主页').fontSize(this.compact ? 24 : 30)
+              .fontWeight(FontWeight.Bold).width('100%')
+            Text(`${GlobalState.course?.class_name ?? ''} · ${GlobalState.course?.teacher_name ?? ''}`)
+              .fontSize(14).fontColor(AppTheme.TEXT_SECONDARY).width('100%')
+          }.layoutWeight(1)
+        }.width('100%')
+        Row() {
+          Text(`已发布课次 ${this.officialLessonCount}`).fontSize(14).fontColor(AppTheme.TEXT_SECONDARY)
+          Blank()
+          if (GlobalState.course?.invite_code) {
+            Button(`邀请码 ${GlobalState.course?.invite_code}`).stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).fontSize(13).height(40)
+              .fontColor('#305FC3').backgroundColor(Color.Transparent).onClick(() => { this.copyInvite(); })
+          }
+        }.width('100%')
+        if (this.compact) {
+          this.teacherHomeEntry('课堂', $r('sys.symbol.mic'), '#00795C', 'class')
+          this.teacherHomeEntry('AI数据', $r('sys.symbol.doc_text'), '#305FC3', 'course_ai')
+          this.teacherHomeEntry('AI学习小组', $r('sys.symbol.person_2'), '#8757A6', 'ai_meeting')
+          this.teacherHomeEntry('资料', $r('sys.symbol.folder'), '#98600F', 'materials')
+        } else {
+          Row({ space: 20 }) {
+            Column() { this.teacherHomeEntry('课堂', $r('sys.symbol.mic'), '#00795C', 'class') }.layoutWeight(1)
+            Column() { this.teacherHomeEntry('AI数据', $r('sys.symbol.doc_text'), '#305FC3', 'course_ai') }.layoutWeight(1)
+          }.width('100%')
+          Row({ space: 20 }) {
+            Column() { this.teacherHomeEntry('AI学习小组', $r('sys.symbol.person_2'), '#8757A6', 'ai_meeting') }.layoutWeight(1)
+            Column() { this.teacherHomeEntry('资料', $r('sys.symbol.folder'), '#98600F', 'materials') }.layoutWeight(1)
+          }.width('100%')
+        }
+      }.width('100%').padding(this.compact ? 16 : 32)
+    }.width('100%').height('100%').align(Alignment.Top)
+  }
+
   build() {
     Stack() {
-      if (this.compact) {
-        Scroll() {
-          Column({ space: 16 }) {
-            Text(GlobalState.course?.name ?? '课程概览').fontSize(24).fontWeight(FontWeight.Bold).width('100%')
-            Text(`${this.officialLessonCount} 个官方课时 · ${this.classNoteCount} 篇班级笔记 · ${this.personalNoteCount} 篇个人笔记`)
-              .fontSize(14).fontColor(AppTheme.TEXT_SECONDARY).width('100%')
-            Button('课堂').width('100%').height(60).backgroundColor(AppTheme.PRIMARY).onClick(() => { this.openClassPage(); })
-            Button('AI 问答').width('100%').height(60).backgroundColor(AppTheme.PRIMARY_LIGHT).fontColor(AppTheme.PRIMARY_DEEP).onClick(() => { this.openAiPage(); })
-            Button('笔记').width('100%').height(60).backgroundColor(AppTheme.PRIMARY_LIGHT).fontColor(AppTheme.PRIMARY_DEEP).onClick(() => { this.openNotesPage(); })
-            if (!GlobalState.isTeacher()) { Button('刷题').width('100%').height(60).onClick(() => { this.currentTab = 'practice'; }) }
-          }.width('100%').padding(20)
-        }.width('100%').height('100%').align(Alignment.Top)
-      } else {
-      this.pageAtmosphere()
-
-      Column({ space: AppTheme.SPACE_L }) {
-        this.heroPanel()
-
-        if (!GlobalState.isTeacher()) {
-          this.practiceEntryBanner()
-        }
-
-        Row({ space: AppTheme.SPACE_L }) {
-          this.entryCard('class', '课程', '课堂记录、官方课时与录音成果', AMBER, (): void => {
-            this.openClassPage();
-          })
-          this.entryCard('ai', 'AI', '基于课程知识库的问答助手', BLUE, (): void => {
-            this.openAiPage();
-          })
-          this.entryCard('notes', '笔记', '班级笔记与个人笔记', AppTheme.PRIMARY, (): void => {
-            this.openNotesPage();
-          })
-        }
-        .layoutWeight(1)
-        .width('100%')
-        .alignItems(VerticalAlign.Top)
-      }
-      .width('100%')
-      .height('100%')
-      .padding({ left: AppTheme.SPACE_XXL, right: AppTheme.SPACE_XXL, top: 34, bottom: AppTheme.SPACE_XXL })
-      }
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(BG_CANVAS)
-    .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 1000 || Number(newArea.height) < 650; })
+      if (GlobalState.isTeacher()) { this.teacherHome() }
+      else { this.studentHome() }
+    }.width('100%').height('100%')
+      .backgroundColor(GlobalState.isTeacher() ? BG_CANVAS : AppTheme.BG_PAGE)
+      .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 1000 || Number(newArea.height) < 650; })
   }
 }

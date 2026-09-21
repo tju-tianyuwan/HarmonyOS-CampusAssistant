@@ -1,8 +1,12 @@
+import { TouchMotion } from '../common/TouchMotion';
 import { promptAction } from '@kit.ArkUI';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { ClassCourse } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
+import { deviceInfo } from '@kit.BasicServicesKit';
+import { TimetablePage } from './TimetablePage';
+import { CourseScheduleDialog } from './CourseScheduleDialog';
 
 // 玻璃分层：底层面板/内容卡片/弹窗浮层，透明度逐级升高
 const GLASS_PANEL_BG: string = 'rgba(255,255,255,0.56)';
@@ -63,6 +67,7 @@ const COURSE_VISUALS: CourseVisual[] = [
  */
 @Component
 export struct LibraryPage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
   @State compact: boolean = false;
   onEnterCourse: () => void = () => {
   };
@@ -73,8 +78,9 @@ export struct LibraryPage {
   @State courses: ClassCourse[] = [];
   @State showForm: boolean = false;
   @State formOpenProgress: boolean = false;
-  @State formCourseName: string = '';
-  @State formClassName: string = '';
+  @State scheduleCourseId: number = -1;
+  @State scheduleCourseName: string = '';
+  @State timetableRevision: number = 0;
   @State formInviteCode: string = '';
   @State hoveredCourseId: number = -1;
   @State pressedCourseId: number = -1;
@@ -93,7 +99,6 @@ export struct LibraryPage {
     this.enteringCourseActive = false;
     this.updateGreeting();
     this.loadCourses();
-    this.startFabPulse();
     this.startGreetingClock();
   }
 
@@ -171,24 +176,15 @@ export struct LibraryPage {
     this.stopCourseEnterAnimation();
     this.pressedCourseId = -1;
     this.hoveredCourseId = -1;
-    this.enteringCourseId = cc.id;
-    this.enteringCourseActive = true;
-    this.courseEnterTimer = setTimeout(() => {
-      this.courseEnterTimer = -1;
-      this.enter(cc);
-      this.enteringCourseActive = false;
-      this.enteringCourseId = -1;
-    }, 260);
+    this.enter(cc);
   }
 
   private openForm(): void {
+    this.scheduleCourseId = -1;
+    this.scheduleCourseName = '';
     this.stopFormAnimation();
     this.showForm = true;
-    this.formOpenProgress = false;
-    this.formTimer = setTimeout(() => {
-      this.formOpenProgress = true;
-      this.formTimer = -1;
-    }, 24);
+    this.formOpenProgress = true;
   }
 
   private closeForm(): void {
@@ -197,10 +193,7 @@ export struct LibraryPage {
     }
     this.stopFormAnimation();
     this.formOpenProgress = false;
-    this.formTimer = setTimeout(() => {
-      this.showForm = false;
-      this.formTimer = -1;
-    }, 340);
+    this.showForm = false;
   }
 
   private toast(msg: string): void {
@@ -260,37 +253,24 @@ export struct LibraryPage {
     try {
       this.courses = JSON.parse(
         await Api.get(`/courses?user_id=${GlobalState.userId()}`)) as ClassCourse[];
+      this.timetableRevision++;
     } catch (e) {
       this.toast(`加载课程失败：${(e as Error).message}`);
     }
   }
 
-  private async createCourse(): Promise<void> {
-    if (this.formCourseName.trim() === '' || this.formClassName.trim() === '') {
-      this.toast('请填写课程名与班级名');
-      return;
-    }
-    interface CreateBody {
-      name: string;
-      class_name: string;
-      teacher_id: number;
-    }
+  private canSchedule(id: number): boolean {
+    return GlobalState.isTeacher() && this.courses.some((course: ClassCourse) =>
+      course.id === id && course.teacher_id === GlobalState.userId() && !course.is_personal);
+  }
 
-    const body: CreateBody = {
-      name: this.formCourseName.trim(),
-      class_name: this.formClassName.trim(),
-      teacher_id: GlobalState.userId()
-    };
-    try {
-      const cc: ClassCourse = JSON.parse(await Api.post('/courses', body)) as ClassCourse;
-      this.toast(`已创建，邀请码 ${cc.invite_code}`);
-      this.closeForm();
-      this.formCourseName = '';
-      this.formClassName = '';
-      await this.loadCourses();
-    } catch (e) {
-      this.toast(`创建失败：${(e as Error).message}`);
-    }
+  private editSchedule(id: number): void {
+    const course = this.courses.find((item: ClassCourse) => item.id === id);
+    if (course === undefined || !this.canSchedule(id)) { return; }
+    this.scheduleCourseId = id;
+    this.scheduleCourseName = course.name;
+    this.showForm = true;
+    this.formOpenProgress = true;
   }
 
   private async joinCourse(): Promise<void> {
@@ -322,9 +302,10 @@ export struct LibraryPage {
 
   // ---------- Glass UI ----------
   @Builder
-  topStatCard(value: string, label: string, tint: string) {
+  topStatCard(label: string, tint: string) {
     Column({ space: 3 }) {
-      Text(value)
+      Text(label === '课程数量' ? `${this.courses.length}` : `${new Set(this.courses
+        .filter((course: ClassCourse) => !course.is_personal).map((course: ClassCourse) => course.class_name)).size}`)
         .fontSize(24)
         .fontWeight(FontWeight.Bold)
         .fontColor(AppTheme.INK)
@@ -383,7 +364,12 @@ export struct LibraryPage {
           Text(this.userName()).fontSize(20).fontWeight(FontWeight.Bold).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(`${this.courses.length} 门课程`).fontSize(13).fontColor(AppTheme.TEXT_SECONDARY)
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        Button('个人设置').fontColor(AppTheme.PRIMARY_DEEP).backgroundColor(AppTheme.PRIMARY_LIGHT)
+        Button('个人设置').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).fontColor(AppTheme.PRIMARY_DEEP).backgroundColor(AppTheme.PRIMARY_LIGHT)
           .onClick(() => { this.onOpenSettings(); })
       }.width('100%').height(64)
     } else {
@@ -395,7 +381,7 @@ export struct LibraryPage {
           .fontColor('#FFFFFF')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text('学生·课堂记录与复习')
+        Text(GlobalState.isTeacher() ? '教师 · 课程教学' : '学生 · 课堂记录与复习')
           .fontSize(AppTheme.FONT_BODY)
           .fontColor('rgba(255,255,255,0.82)')
       }
@@ -418,8 +404,8 @@ export struct LibraryPage {
       .shadow({ radius: 36, color: 'rgba(53,108,243,0.28)', offsetX: 0, offsetY: 14 })
 
       Row({ space: AppTheme.SPACE_M }) {
-        this.topStatCard('0', '课程数量', 'rgba(220,244,255,0.90)')
-        this.topStatCard('暂无班级', '班级', 'rgba(239,232,255,0.88)')
+        this.topStatCard('课程数量', 'rgba(220,244,255,0.90)')
+        this.topStatCard('班级数量', 'rgba(239,232,255,0.88)')
         this.avatarSwitch()
       }
       .height(104)
@@ -573,6 +559,18 @@ export struct LibraryPage {
         .padding({ left: AppTheme.SPACE_M, right: AppTheme.SPACE_M, top: AppTheme.SPACE_M, bottom: AppTheme.SPACE_M })
         .alignItems(HorizontalAlign.Start)
       }
+      if (this.canSchedule(dc.id)) {
+        Button({ type: ButtonType.Normal }) {
+          SymbolGlyph($r('sys.symbol.calendar')).fontSize(20).fontColor(['#305FC3'])
+        }.stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).width(40).height(40).borderRadius(8).backgroundColor('#FFFFFF')
+          .position({ x: 240, y: 8 }).accessibilityText('设置上课时间')
+          .onClick(() => { this.editSchedule(dc.id); })
+      }
     }
     .width(292)
     .height(276)
@@ -591,31 +589,61 @@ export struct LibraryPage {
       offsetX: 0,
       offsetY: this.isCourseEntering(dc.id) ? 22 : (this.hoveredCourseId === dc.id ? 16 : 9)
     })
-    .opacity(this.isCourseEntering(dc.id) ? 0 : 1)
-    .translate({
-      x: 0,
-      y: this.isCourseEntering(dc.id) ? -18 : (this.hoveredCourseId === dc.id ? -6 : 0)
+    .stateStyles({
+      normal: { .translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+      pressed: { .translate(TouchMotion.pressedOffset(this.reduceMotion, 'card')).animation(TouchMotion.press(this.reduceMotion)) }
     })
-    .scale({
-      x: this.isCourseEntering(dc.id) ? 1.12 : (this.pressedCourseId === dc.id ? 0.96 : 1),
-      y: this.isCourseEntering(dc.id) ? 1.12 : (this.pressedCourseId === dc.id ? 0.96 : 1)
-    })
-    .animation({ duration: this.isCourseEntering(dc.id) ? 260 : 180, curve: Curve.EaseOut })
     .onHover((isHover: boolean) => {
       this.hoveredCourseId = isHover ? dc.id : -1;
     })
-    .onTouch((event: TouchEvent) => {
-      if (event.type === TouchType.Down) {
-        this.pressedCourseId = dc.id;
-      } else if (event.type === TouchType.Up) {
-        this.pressedCourseId = -1;
-      }
-    })
     .onClick(() => {
-      if (!this.isCourseEntering(dc.id)) {
+      if (!this.showForm && !this.isCourseEntering(dc.id)) {
         this.enterDisplay(dc);
       }
     })
+  }
+
+  @Builder
+  compactTeacherCourseCard(dc: DisplayCourse) {
+    Row({ space: 8 }) {
+      Row({ space: 12 }) {
+        SymbolGlyph($r('sys.symbol.doc_text'))
+          .fontSize(24).fontColor([this.visual(dc.id).ink])
+          .width(44).height(44).backgroundColor(this.visual(dc.id).wash).borderRadius(8)
+        Column({ space: 6 }) {
+          Text(dc.name).fontSize(17).fontWeight(FontWeight.Medium).fontColor(AppTheme.INK)
+            .width('100%').maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(`${dc.class_name} · ${dc.teacher_name}`).fontSize(12).fontColor(AppTheme.TEXT_SECONDARY)
+            .width('100%').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(`邀请码 ${dc.invite_code}`).fontSize(12).fontColor(this.visual(dc.id).ink)
+            .width('100%').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(12).fontColor([AppTheme.TEXT_TERTIARY])
+      }.layoutWeight(1).height('100%')
+        .accessibilityText(`进入课程：${dc.name}，${dc.class_name}`)
+        .stateStyles({
+          normal: { .translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+          pressed: { .translate(TouchMotion.pressedOffset(this.reduceMotion, 'card')).animation(TouchMotion.press(this.reduceMotion)) }
+        })
+        .onClick(() => {
+          if (!this.showForm && !this.enteringCourseActive) { this.enterDisplay(dc); }
+        })
+      if (this.canSchedule(dc.id)) {
+        Button({ type: ButtonType.Normal }) {
+          SymbolGlyph($r('sys.symbol.calendar')).fontSize(20).fontColor(['#305FC3'])
+        }.stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).width(44).height(44).borderRadius(8).backgroundColor('#EEF3FC')
+          .accessibilityText(`设置${dc.name}的上课时间`)
+          .bindPopup(this.hoveredCourseId === dc.id, { message: '设置上课时间' })
+          .onHover((hovered: boolean) => { this.hoveredCourseId = hovered ? dc.id : -1; })
+          .onClick(() => { this.editSchedule(dc.id); })
+      }
+    }.width('100%').height(120).padding(12).borderRadius(8)
+      .backgroundColor('#FFFFFF').border({ width: 1, color: '#E5EAF0' })
   }
 
   @Builder
@@ -624,9 +652,15 @@ export struct LibraryPage {
       Flex({ wrap: FlexWrap.Wrap }) {
         ForEach(this.displayCourses(), (dc: DisplayCourse) => {
           Column() {
-            this.courseCard(dc)
+            if (this.compact && GlobalState.isTeacher()) {
+              this.compactTeacherCourseCard(dc)
+            } else {
+              this.courseCard(dc)
+            }
           }
-          .margin({ right: AppTheme.SPACE_M, bottom: AppTheme.SPACE_L })
+          .width(this.compact && GlobalState.isTeacher() ? '100%' : 292)
+          .margin({ right: this.compact && GlobalState.isTeacher() ? 0 : AppTheme.SPACE_M,
+            bottom: this.compact && GlobalState.isTeacher() ? 10 : AppTheme.SPACE_L })
         }, (dc: DisplayCourse) => `${dc.id}`)
       }
       .width('100%')
@@ -684,12 +718,6 @@ export struct LibraryPage {
       }
       .width(132)
       .height(132)
-      .translate({ x: 0, y: this.fabPressed ? 5 : 0 })
-      .scale({
-        x: this.fabPressed ? 0.94 : (this.fabPulse ? 1.02 : 1),
-        y: this.fabPressed ? 0.94 : (this.fabPulse ? 1.02 : 1)
-      })
-      .animation({ duration: this.fabPressed ? 90 : 180, curve: Curve.EaseOut })
       Text('新建/加入课程')
         .fontSize(AppTheme.FONT_CAPTION)
         .fontWeight(FontWeight.Medium)
@@ -702,12 +730,9 @@ export struct LibraryPage {
         .shadow({ radius: 18, color: 'rgba(76,110,180,0.14)', offsetX: 0, offsetY: 6 })
     }
     .margin({ right: AppTheme.SPACE_L, bottom: AppTheme.SPACE_L })
-    .onTouch((event: TouchEvent) => {
-      if (event.type === TouchType.Down) {
-        this.fabPressed = true;
-      } else if (event.type === TouchType.Up) {
-        this.fabPressed = false;
-      }
+    .stateStyles({
+      normal: { .scale({ x: 1, y: 1 }).animation(TouchMotion.release(this.reduceMotion)) },
+      pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'icon')).animation(TouchMotion.press(this.reduceMotion)) }
     })
     .onClick(() => {
       this.fabPressed = false;
@@ -718,118 +743,30 @@ export struct LibraryPage {
   @Builder
   formOverlay() {
     Stack({ alignContent: Alignment.Center }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .backdropBlur(28)
-        .backgroundColor('rgba(20,34,72,0.22)')
-        .opacity(this.formOpenProgress ? 1 : 0)
-        .animation({ duration: 220, curve: Curve.EaseOut })
-        .onClick(() => {
-          this.closeForm();
-        })
-
-      Column({ space: AppTheme.SPACE_L }) {
-        Text(GlobalState.isTeacher() ? '新建课程' : '加入课程')
-          .fontSize(AppTheme.FONT_TITLE)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(AppTheme.INK)
-
-        if (GlobalState.isTeacher()) {
-          TextInput({ placeholder: '课程名，如：数据结构', text: this.formCourseName })
-            .fontSize(AppTheme.FONT_BODY)
-            .height(44)
-            .borderRadius(26)
-            .backdropBlur(GLASS_BLUR_STRENGTH)
-            .backgroundColor('rgba(255,255,255,0.56)')
-            .border({ width: 1.2, color: 'rgba(255,255,255,0.88)' })
-            .shadow({ radius: 12, color: 'rgba(83,114,180,0.10)', offsetX: 0, offsetY: 5 })
-            .onChange((v: string) => {
-              this.formCourseName = v;
-            })
-          TextInput({ placeholder: '班级名，如：计科2301', text: this.formClassName })
-            .fontSize(AppTheme.FONT_BODY)
-            .height(44)
-            .borderRadius(26)
-            .backdropBlur(GLASS_BLUR_STRENGTH)
-            .backgroundColor('rgba(255,255,255,0.56)')
-            .border({ width: 1.2, color: 'rgba(255,255,255,0.88)' })
-            .shadow({ radius: 12, color: 'rgba(83,114,180,0.10)', offsetX: 0, offsetY: 5 })
-            .onChange((v: string) => {
-              this.formClassName = v;
-            })
-          Button('创建课程')
-            .width('100%')
-            .height(44)
-            .fontSize(AppTheme.FONT_BODY)
-            .fontColor('#FFFFFF')
-            .backgroundColor('#3863F0')
-            .borderRadius(999)
-            .shadow({ radius: 18, color: 'rgba(56,99,240,0.30)', offsetX: 0, offsetY: 8 })
-            .onClick(() => {
-              this.createCourse();
-            })
-        } else {
-          TextInput({ placeholder: '输入 6 位邀请码', text: this.formInviteCode })
-            .fontSize(AppTheme.FONT_BODY)
-            .height(44)
-            .maxLength(6)
-            .borderRadius(26)
-            .backdropBlur(GLASS_BLUR_STRENGTH)
-            .backgroundColor('rgba(255,255,255,0.56)')
-            .border({ width: 1.2, color: 'rgba(255,255,255,0.88)' })
-            .shadow({ radius: 12, color: 'rgba(83,114,180,0.10)', offsetX: 0, offsetY: 5 })
-            .onChange((v: string) => {
-              this.formInviteCode = v;
-            })
-          Button('加入课程')
-            .width('100%')
-            .height(44)
-            .fontSize(AppTheme.FONT_BODY)
-            .fontColor('#FFFFFF')
-            .backgroundColor('#3863F0')
-            .borderRadius(999)
-            .shadow({ radius: 18, color: 'rgba(56,99,240,0.30)', offsetX: 0, offsetY: 8 })
-            .onClick(() => {
-              this.joinCourse();
-            })
-        }
-
-        Text('取消')
-          .fontSize(AppTheme.FONT_BODY)
-          .fontColor(AppTheme.TEXT_TERTIARY)
-          .onClick(() => {
-            this.closeForm();
-          })
-      }
-      .width('92%').constraintSize({ maxWidth: 392 })
-      .padding(AppTheme.SPACE_XL)
-      .borderRadius(26)
-      .backdropBlur(30)
-      .backgroundColor('rgba(255,255,255,0.48)')
-      .linearGradient({
-        angle: 128,
-        colors: [
-          ['rgba(255,255,255,0.84)', 0],
-          ['rgba(240,250,255,0.60)', 0.48],
-          ['rgba(235,229,255,0.52)', 1]
-        ]
-      })
-      .border({ width: 1.5, color: 'rgba(255,255,255,0.92)' })
-      .shadow({ radius: 46, color: 'rgba(56,99,240,0.26)', offsetX: 0, offsetY: 20 })
-      .opacity(this.formOpenProgress ? 1 : 0)
-      .translate({
-        x: this.formOpenProgress ? 0 : 540,
-        y: this.formOpenProgress ? 0 : 320
-      })
-      .scale({
-        x: this.formOpenProgress ? 1 : 0.14,
-        y: this.formOpenProgress ? 1 : 0.14
-      })
-      .animation({ duration: 320, curve: Curve.EaseOut })
-    }
-    .width('100%')
-    .height('100%')
+      Column().width('100%').height('100%').backgroundColor('rgba(20,34,50,0.3)')
+        .onClick(() => { this.closeForm(); })
+      Column({ space: 18 }) {
+        Text('加入课程').fontSize(22).fontWeight(FontWeight.Bold)
+        TextInput({ placeholder: '输入 6 位邀请码', text: this.formInviteCode }).height(44).maxLength(6)
+          .onChange((value: string) => { this.formInviteCode = value; })
+        Button('加入课程').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).width('100%').height(44).borderRadius(8).backgroundColor('#305FC3')
+          .onClick(() => { this.joinCourse(); })
+        Button('取消').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).width('100%').height(40).backgroundColor(Color.Transparent).fontColor(AppTheme.TEXT_SECONDARY)
+          .onClick(() => { this.closeForm(); })
+      }.width('92%').constraintSize({ maxWidth: 392 }).padding(24).borderRadius(8).backgroundColor('#FFFFFF')
+    }.width('100%').height('100%')
+      .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 18 }))
+        .animation({ duration: this.reduceMotion ? 0 : 220, curve: TouchMotion.enter() }))
   }
 
   @Builder
@@ -942,9 +879,86 @@ export struct LibraryPage {
     .height('100%')
   }
 
+  @Builder
+  studentLibrary() {
+    Column({ space: 24 }) {
+      Row({ space: 20 }) {
+        Column({ space: 8 }) {
+          Text(`${this.greeting}，${this.userName()}`).fontSize(30).fontWeight(FontWeight.Bold)
+            .fontColor(AppTheme.TEXT_PRIMARY).maxLines(2)
+          Text(`我的课程 · ${this.courses.length} 门`).fontSize(15).fontColor(AppTheme.TEXT_SECONDARY)
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+        Button('个人设置').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).height(44).fontSize(14).borderRadius(12)
+          .fontColor(AppTheme.PRIMARY).backgroundColor(AppTheme.PRIMARY_LIGHT).onClick(this.onOpenSettings)
+        Button('加入课程').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).height(44).fontSize(14).borderRadius(12)
+          .fontColor(AppTheme.BG_WHITE).backgroundColor(AppTheme.PRIMARY).onClick(() => { this.openForm(); })
+      }.width('100%')
+      Scroll() {
+        Grid() {
+          if (this.courses.length === 0) {
+            GridItem() {
+              Text('还没有课程，使用老师的邀请码加入吧').fontSize(16)
+                .fontColor(AppTheme.TEXT_SECONDARY).padding(32)
+            }
+          }
+          ForEach(this.courses, (course: ClassCourse) => {
+            GridItem() {
+            Column({ space: 22 }) {
+              Row() {
+              Stack() { SymbolGlyph($r('sys.symbol.book')).fontSize(28).fontColor([AppTheme.PRIMARY]) }
+                .width(64).height(64).borderRadius(20).backgroundColor(AppTheme.PRIMARY_LIGHT)
+              Blank()
+              SymbolGlyph($r('sys.symbol.arrow_up_right')).fontSize(18).fontColor([AppTheme.PRIMARY])
+              }.width('100%')
+              Column({ space: 8 }) {
+                Text(course.name).fontSize(21).fontWeight(FontWeight.Medium).fontColor(AppTheme.TEXT_PRIMARY)
+                  .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text(`${course.class_name} · ${course.teacher_name}`).fontSize(14).fontColor(AppTheme.TEXT_SECONDARY)
+                  .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+              }.width('100%').alignItems(HorizontalAlign.Start)
+              Text('进入课程  ›').fontSize(14).fontColor(AppTheme.PRIMARY).width('100%')
+            }.width('100%').constraintSize({ minHeight: 240 }).padding(24).borderRadius(26)
+              .backgroundColor(AppTheme.BG_CARD).border({ width: 1, color: '#F5FFFFFF' })
+              .shadow({ radius: 20, color: '#12436F9D', offsetY: 8 })
+              .stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'card'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'card')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
+              .accessibilityText(`进入${course.name}`).onClick(() => { this.enter(course); })
+            }
+          }, (course: ClassCourse) => `${course.id}`)
+        }.width('100%').columnsTemplate(this.compact ? '1fr 1fr' : '1fr 1fr 1fr').columnsGap(20).rowsGap(20)
+      }.width('100%').layoutWeight(1).align(Alignment.Top).scrollBar(BarState.Auto)
+    }.width('100%').height('100%').padding(32).backgroundColor(AppTheme.BG_PAGE)
+  }
+
   build() {
     Stack({ alignContent: Alignment.BottomEnd }) {
-      this.nativeFluidBackground()
+      if (deviceInfo.deviceType === 'phone' && !GlobalState.isTeacher()) {
+        TimetablePage({ courses: this.courses, revision: this.timetableRevision,
+          onEnterCourse: (course: ClassCourse) => { this.enter(course); },
+          onJoinCourse: () => { this.openForm(); },
+          onOpenSettings: this.onOpenSettings })
+      } else if (!GlobalState.isTeacher()) {
+        this.studentLibrary()
+      } else {
+      if (this.compact && GlobalState.isTeacher()) {
+        Column().width('100%').height('100%').backgroundColor('#F5F7FA')
+      } else {
+        this.nativeFluidBackground()
+      }
 
       Column({ space: AppTheme.SPACE_L }) {
         this.topArea()
@@ -983,17 +997,27 @@ export struct LibraryPage {
       .padding(this.compact ? 16 : AppTheme.SPACE_XXL)
 
       if (this.compact) {
-        Button(GlobalState.isTeacher() ? '新建课程' : '加入课程').height(44).backgroundColor(AppTheme.PRIMARY)
-          .margin(16).onClick(() => { this.showForm = true; this.formOpenProgress = true; })
+        Button(GlobalState.isTeacher() ? '新建课程' : '加入课程').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).height(44).backgroundColor(AppTheme.PRIMARY)
+          .margin(16).onClick(() => { this.openForm(); })
       } else { this.fab() }
+      }
 
       if (this.showForm) {
-        this.formOverlay()
+        if (GlobalState.isTeacher()) {
+          CourseScheduleDialog({ courseId: this.scheduleCourseId, courseName: this.scheduleCourseName,
+            onClose: () => { this.showForm = false; },
+            onSaved: () => { this.showForm = false; this.loadCourses(); } })
+        } else { this.formOverlay() }
       }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(BG_BASE)
+    .backgroundColor(GlobalState.isTeacher() ? BG_BASE : Color.Transparent)
     .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 900 || Number(newArea.height) < 500; })
   }
 }

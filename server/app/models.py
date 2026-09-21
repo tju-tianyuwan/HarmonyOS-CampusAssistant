@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -26,11 +26,44 @@ class Membership(SQLModel, table=True):
     class_course_id: int = Field(foreign_key="classcourse.id")
 
 
+class TimetableSettings(SQLModel, table=True):
+    user_id: int = Field(primary_key=True, foreign_key="user.id")
+    semester_start: date
+
+
+class TimetableEntry(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    class_course_id: int = Field(foreign_key="classcourse.id", index=True)
+    weekday: int
+    start_section: int
+    end_section: int
+    start_week: int = 1
+    end_week: int = 20
+    week_type: str = "all"
+    location: str = ""
+
+
+class CourseSchedule(SQLModel, table=True):
+    """Teacher-owned recurring time slot, inherited through course membership."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    class_course_id: int = Field(foreign_key="classcourse.id", index=True)
+    semester_start: date
+    weekday: int
+    start_section: int
+    end_section: int
+    start_week: int = 1
+    end_week: int = 20
+    week_type: str = "all"
+    location: str = ""
+
+
 class CourseSession(SQLModel, table=True):
     """一次课时"""
     id: Optional[int] = Field(default=None, primary_key=True)
     class_course_id: int = Field(foreign_key="classcourse.id", index=True)
     title: str
+    ai_title: str = ""
     creator_id: int = Field(foreign_key="user.id")
     status: str = "recording"  # recording | transcribing | done
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -58,6 +91,7 @@ class Outline(SQLModel, table=True):
 class Note(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     class_course_id: int = Field(index=True)
+    session_id: Optional[int] = Field(default=None, foreign_key="coursesession.id", index=True)
     owner_id: int = Field(foreign_key="user.id")
     title: str
     kind: str = "md"  # md | handwriting
@@ -167,6 +201,16 @@ class KnowledgeDocument(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class SessionResource(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="coursesession.id", index=True)
+    class_course_id: int = Field(foreign_key="classcourse.id", index=True)
+    uploader_id: int = Field(foreign_key="user.id")
+    filename: str
+    content: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class DocumentJob(SQLModel, table=True):
     id: str = Field(primary_key=True)
     class_course_id: int = Field(index=True)
@@ -185,6 +229,8 @@ class MeetingRoom(SQLModel, table=True):
     class_course_id: int = Field(foreign_key="classcourse.id", index=True)
     creator_id: int = Field(foreign_key="user.id")
     name: str
+    room_type: str = Field(default="ai_meeting", index=True)  # ai_meeting | group_chat
+    agent_mode: str = "multi"  # multi | single
     participant_limit: int = 20
     enabled: bool = True
     status: str = "active"

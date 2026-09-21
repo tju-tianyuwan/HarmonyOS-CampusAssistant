@@ -1,8 +1,11 @@
+import { TouchMotion } from '../common/TouchMotion';
+import { MotionPage } from '../common/components/MotionPage';
 import { promptAction } from '@kit.ArkUI';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { AppTheme } from '../common/AppTheme';
 import { Api } from '../service/Api';
 import { SessionStore } from '../service/SessionStore';
+import { MotionPreferences } from '../service/MotionPreferences';
 import { GlobalState } from '../service/GlobalState';
 import { CollabManager } from '../service/collab/CollabManager';
 import { nfcService } from '../service/collab/NfcService';
@@ -15,6 +18,7 @@ import { AccountSecurityPage } from './AccountSecurityPage';
  */
 @Component
 export struct SettingsPage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
   onClose: () => void = () => {
   };
   onLogout: () => void = () => {
@@ -103,6 +107,7 @@ export struct SettingsPage {
   }
 
   build() {
+    MotionPage({ navigationKey: `${this.securityOpen ? 1 : 0}|settings` }) {
     if (this.securityOpen) {
       AccountSecurityPage({ onClose: () => { this.securityOpen = false; },
         onPasswordChanged: () => { this.toast('密码已修改，请重新登录'); this.onLogout(); } })
@@ -124,6 +129,11 @@ export struct SettingsPage {
           Blank()
           Text('✕')
             .fontSize(18)
+            .width(44).height(44).textAlign(TextAlign.Center)
+            .stateStyles({
+              normal: { .scale({ x: 1, y: 1 }).animation(TouchMotion.release(this.reduceMotion)) },
+              pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'icon')).animation(TouchMotion.press(this.reduceMotion)) }
+            })
             .fontColor(AppTheme.TEXT_SECONDARY)
             .onClick(() => {
               this.onClose();
@@ -170,8 +180,27 @@ export struct SettingsPage {
         .borderRadius(AppTheme.RADIUS_CARD)
         .backgroundColor(AppTheme.BG_CARD)
 
-        Button('账号安全').width('100%').backgroundColor(AppTheme.PRIMARY_LIGHT).fontColor(AppTheme.PRIMARY_DEEP)
+        Button('账号安全').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).width('100%').backgroundColor(AppTheme.PRIMARY_LIGHT).fontColor(AppTheme.PRIMARY_DEEP)
           .enabled(AppStorage.get<boolean>('recordingActive') !== true).onClick(() => { this.securityOpen = true; })
+        this.sectionTitle('界面动效')
+        Row({ space: 12 }) {
+          Column({ space: 4 }) {
+            Text('减弱动效').fontSize(16).fontColor(AppTheme.INK)
+            Text('减少按压缩放与页面位移，保留选中和操作反馈').fontSize(12)
+              .fontColor(AppTheme.TEXT_SECONDARY)
+          }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+          Toggle({ type: ToggleType.Switch, isOn: this.reduceMotion })
+            .selectedColor(AppTheme.PRIMARY).accessibilityText('减弱动效')
+            .onChange((value: boolean) => {
+              this.reduceMotion = value;
+              MotionPreferences.save(value).catch(() => { this.toast('动效设置已生效，但未能保存，下次打开需重新设置'); });
+            })
+        }.width('100%').padding(16).borderRadius(16).backgroundColor(AppTheme.BG_CARD)
         // 鸿蒙协同（默认开启）
         this.sectionTitle('鸿蒙协同（默认开启，真机可用）')
         this.switchRow('📳', 'NFC 碰一碰', '同账号手机→平板，一碰接续学习', this.nfcOn,
@@ -181,7 +210,12 @@ export struct SettingsPage {
             CollabManager.applyNfc(v);
           })
         if (this.nfcOn) {
-          Button('📳 把当前学习状态写入 NFC 标签')
+          Button('📳 把当前学习状态写入 NFC 标签').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
             .width('100%')
             .height(40)
             .fontSize(AppTheme.FONT_CAPTION)
@@ -230,7 +264,12 @@ export struct SettingsPage {
           .onChange((v: string) => {
             this.serverUrl = v;
           })
-        Button('保存服务器地址')
+        Button('保存服务器地址').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .width('100%')
           .height(42)
           .fontSize(AppTheme.FONT_BODY)
@@ -268,6 +307,7 @@ export struct SettingsPage {
     }
     .width('100%')
     .height('100%')
+    }
     }
   }
 }

@@ -11,7 +11,8 @@ from sqlmodel import SQLModel, Session, create_engine, select
 
 from app.db import get_db
 from app.models import (Account, AccountCode, AuthSession, ClassCourse, CourseSession, EmailCode, Membership,
-                        MeetingMember, MeetingMessage, MeetingRoom, Note, Outline, TranscriptSegment, User)
+                        MeetingMember, MeetingMessage, MeetingRoom, Note, Outline, PersonalWorkspace,
+                        SessionResource, TranscriptSegment, User)
 from app.routers import auth, courses, sessions, notes, chat, analytics, practice, knowledge, meetings
 from app.services import rag
 from app.services import meetings as scheduler
@@ -50,6 +51,46 @@ class WorkflowsTest(unittest.TestCase):
     def as_user(self, user):
         self.client.headers['Authorization'] = f'Bearer token-{user}'
 
+    def test_teacher_materials_are_course_scoped_and_exclude_personal_notes(self):
+        with Session(self.engine) as db:
+            db.add(Outline(session_id=1, class_course_id=1, owner_id=-1, markdown='Official', status='pending'))
+            db.add(Outline(session_id=1, class_course_id=1, owner_id=2, markdown='Private'))
+            db.add(SessionResource(session_id=1, class_course_id=1, uploader_id=1, filename='lesson.txt', content='Lesson'))
+            db.add(ClassCourse(id=2, name='Other', class_name='B', teacher_id=1, invite_code='654321'))
+            db.add(CourseSession(id=2, class_course_id=2, title='Other lesson', creator_id=1))
+            db.add(Outline(session_id=2, class_course_id=2, owner_id=-1, markdown='Other'))
+            db.add(SessionResource(session_id=2, class_course_id=2, uploader_id=1, filename='other.txt', content='Other'))
+            db.commit()
+        response = self.client.get('/api/v1/sessions/materials?class_course_id=1')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers['cache-control'], 'no-store')
+        self.assertEqual(len(response.json()), 2)
+        self.assertEqual({item['kind'] for item in response.json()}, {'outline', 'resource'})
+        self.assertTrue(all(item['session_id'] == 1 for item in response.json()))
+        for user in (2, 3):
+            self.as_user(user)
+            self.assertEqual(self.client.get('/api/v1/sessions/materials?class_course_id=1').status_code, 403)
+        self.client.headers.clear()
+        self.assertEqual(self.client.get('/api/v1/sessions/materials?class_course_id=1').status_code, 401)
+
+    def test_resource_edit_requires_manager_and_matching_session(self):
+        with Session(self.engine) as db:
+            db.add(Outline(session_id=1, class_course_id=1, owner_id=-1, markdown='Official', status='published'))
+            db.add(SessionResource(id=1, session_id=1, class_course_id=1, uploader_id=1, filename='lesson.txt', content='Original'))
+            db.add(CourseSession(id=2, class_course_id=1, title='Next lesson', creator_id=1))
+            db.commit()
+        path = '/api/v1/sessions/1/resources/1'
+        with patch.object(rag, 'add_document') as index:
+            result = self.client.put(path, json={'content': 'Corrected lesson'})
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()['content'], 'Corrected lesson')
+            index.assert_called_once()
+        self.assertEqual(self.client.put('/api/v1/sessions/2/resources/1', json={'content': 'Wrong session'}).status_code, 404)
+        self.assertEqual(self.client.put(path, json={'content': '  '}).status_code, 422)
+        self.as_user(2)
+        self.assertEqual(self.client.put(path, json={'content': 'Student edit'}).status_code, 403)
+        self.assertEqual(self.client.get(path).json()['content'], 'Corrected lesson')
+
     def test_unauthenticated_and_impersonation(self):
         self.client.headers.clear()
         for path in ('/auth/users', '/courses?user_id=1', '/sessions?class_course_id=1', '/knowledge/1'):
@@ -60,10 +101,10 @@ class WorkflowsTest(unittest.TestCase):
 
     def test_register_school_login_logout(self):
         body = dict(account_type='school', school_name='University', student_number='2026001',
-                    name='New Student', password='strong-password', role='teacher')
+                    name='New Teacher', password='strong-password', role='teacher')
         response = self.client.post('/api/v1/auth/register', json=body)
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()['user']['role'], 'student')
+        self.assertEqual(response.json()['user']['role'], 'teacher')
         self.client.headers['Authorization'] = 'Bearer ' + response.json()['access_token']
         self.assertEqual(self.client.get('/api/v1/auth/me').status_code, 200)
         self.assertEqual(self.client.post('/api/v1/auth/logout').status_code, 200)
@@ -72,15 +113,28 @@ class WorkflowsTest(unittest.TestCase):
         body['password'] = 'wrong-password'
         self.assertEqual(self.client.post('/api/v1/auth/login', json=body).status_code, 401)
 
+    def test_registration_role_defaults_to_student_and_rejects_unknown_role(self):
+        body = dict(account_type='school', school_name='University', student_number='2026002',
+                    name='New Student', password='strong-password')
+        response = self.client.post('/api/v1/auth/register', json=body)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['user']['role'], 'student')
+
+        body['student_number'] = '2026003'
+        body['role'] = 'admin'
+        self.assertEqual(self.client.post('/api/v1/auth/register', json=body).status_code, 422)
+
     def test_personal_registration_consumes_code_and_provisions_private_course(self):
         with Session(self.engine) as db:
             db.add(EmailCode(email='student@example.com', code_hash=hash_password('123456'),
                              expires_at=datetime.utcnow() + timedelta(minutes=10)))
             db.commit()
-        body = dict(name='Personal', email='student@example.com', password='strong-password', code='123456')
+        body = dict(name='Personal Teacher', email='student@example.com', password='strong-password',
+                    code='123456', role='teacher')
         response = self.client.post('/api/v1/auth/register', json=body)
         self.assertEqual(response.status_code, 200, response.text)
         user = response.json()['user']
+        self.assertEqual(user['role'], 'teacher')
         self.client.headers['Authorization'] = 'Bearer ' + response.json()['access_token']
         courses_response = self.client.get(f"/api/v1/courses?user_id={user['id']}").json()
         self.assertTrue(courses_response[0]['is_personal'])
@@ -135,6 +189,24 @@ class WorkflowsTest(unittest.TestCase):
             self.assertEqual(self.client.post('/api/v1/sessions/1/outline/generate').status_code, 409)
         self.assertEqual(self.client.get('/api/v1/sessions/1/outline').json()['markdown'], 'Teacher edit')
 
+    def test_course_outline_catalog_is_manager_only(self):
+        with Session(self.engine) as db:
+            db.add(Outline(session_id=1, class_course_id=1, owner_id=-1,
+                           markdown='# AI course outline', status='generated'))
+            db.add(Outline(session_id=1, class_course_id=1, owner_id=2,
+                           markdown='# Personal outline', status='published'))
+            db.commit()
+        response = self.client.get('/api/v1/sessions/outlines?class_course_id=1')
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]['session_title'], 'Trees')
+        self.assertEqual(response.json()[0]['markdown'], '# AI course outline')
+        with Session(self.engine) as db:
+            db.add(PersonalWorkspace(user_id=2, class_course_id=1))
+            db.commit()
+        self.as_user(2)
+        self.assertEqual(self.client.get('/api/v1/sessions/outlines?class_course_id=1').status_code, 403)
+
     def test_note_privacy_and_rag_withdrawal(self):
         self.as_user(2)
         note = self.client.post('/api/v1/notes', json=dict(class_course_id=1, owner_id=2, title='Trees', content='二叉树遍历')).json()
@@ -156,6 +228,44 @@ class WorkflowsTest(unittest.TestCase):
         self.assertTrue(self.client.post('/api/v1/knowledge/1/search', json={'question': '二叉树'}).json()['hits'])
         self.as_user(3)
         self.assertEqual(self.client.post('/api/v1/knowledge/1/search', json={'question': '二叉树'}).status_code, 403)
+
+    def test_lesson_resources_and_personal_notes_are_scoped(self):
+        with Session(self.engine) as db:
+            db.add(Outline(session_id=1, class_course_id=1, owner_id=-1,
+                           markdown='# Trees', status='published'))
+            db.commit()
+        with patch.object(sessions, 'extract', return_value='# Trees\nCourse handout'):
+            response = self.client.post('/api/v1/sessions/1/resources',
+                                        files={'file': ('trees.md', b'course handout')})
+        self.assertEqual(response.status_code, 200, response.text)
+        resource_id = response.json()['id']
+
+        self.as_user(2)
+        note = self.client.post('/api/v1/notes', json={
+            'class_course_id': 1, 'session_id': 1, 'owner_id': 2,
+            'title': 'My tree notes', 'content': 'Traversal',
+        })
+        self.assertEqual(note.status_code, 200, note.text)
+        lesson = self.client.get('/api/v1/sessions?class_course_id=1').json()[0]
+        self.assertEqual(lesson['resource_count'], 1)
+        self.assertEqual([row['title'] for row in lesson['personal_notes']], ['My tree notes'])
+        self.assertEqual(self.client.get('/api/v1/sessions/1/resources').json()[0]['filename'], 'trees.md')
+        self.assertEqual(self.client.get(f'/api/v1/sessions/1/resources/{resource_id}').json()['content'],
+                         '# Trees\nCourse handout')
+        self.assertEqual(self.client.delete(f'/api/v1/sessions/1/resources/{resource_id}').status_code, 403)
+
+        self.as_user(3)
+        self.assertEqual(self.client.get('/api/v1/sessions/1/resources').status_code, 403)
+
+    def test_students_cannot_create_or_upload_recordings(self):
+        self.as_user(2)
+        response = self.client.post('/api/v1/sessions', json={
+            'class_course_id': 1, 'title': 'Private recording', 'creator_id': 2,
+        })
+        self.assertEqual(response.status_code, 403)
+        response = self.client.post('/api/v1/sessions/1/chunks/0',
+                                    files={'file': ('chunk.pcm', b'audio')})
+        self.assertEqual(response.status_code, 403)
 
     def test_meeting_failure_keeps_pending_then_recovers(self):
         room = self.client.post('/api/v1/meetings', json={'class_course_id': 1, 'name': 'Discussion'}).json()
@@ -185,6 +295,95 @@ class WorkflowsTest(unittest.TestCase):
         self.assertEqual(response.json()['status'], 'ended')
         detail = self.client.get(f"/api/v1/meetings/{room['id']}").json()
         self.assertEqual(len(detail['messages']), 14)
+
+    def test_group_chat_is_isolated_from_ai_meeting_scheduler(self):
+        ai_room = self.client.post('/api/v1/meetings', json={
+            'class_course_id': 1, 'name': 'AI room', 'room_type': 'ai_meeting', 'participant_limit': 6,
+        }).json()
+        group = self.client.post('/api/v1/meetings', json={
+            'class_course_id': 1, 'name': 'Study group', 'room_type': 'group_chat', 'participant_limit': 8,
+        }).json()
+        self.assertTrue(ai_room['enabled'])
+        self.assertFalse(group['enabled'])
+        self.assertEqual(
+            [row['id'] for row in self.client.get('/api/v1/meetings?class_course_id=1&room_type=ai_meeting').json()],
+            [ai_room['id']],
+        )
+        self.assertEqual(
+            [row['id'] for row in self.client.get('/api/v1/meetings?class_course_id=1&room_type=group_chat').json()],
+            [group['id']],
+        )
+
+        base = f"/api/v1/meetings/{group['id']}"
+        with patch.object(scheduler, 'process', new=AsyncMock()) as process:
+            response = self.client.post(base + '/messages', json={'content': '@组员A 这只是群聊消息'})
+            self.assertEqual(response.status_code, 200, response.text)
+            process.assert_not_awaited()
+        self.assertEqual(self.client.get(base + '/minutes/export').status_code, 409)
+        self.assertEqual(self.client.post(base + '/end').json()['status'], 'ended')
+        detail = self.client.get(base).json()
+        self.assertEqual([message['role'] for message in detail['messages']], ['user'])
+
+    def test_ai_meeting_direct_mention_uses_named_agent(self):
+        room = self.client.post('/api/v1/meetings', json={
+            'class_course_id': 1, 'name': 'Direct mention', 'room_type': 'ai_meeting',
+        }).json()
+        base = f"/api/v1/meetings/{room['id']}"
+        with patch.object(scheduler, 'engine', self.engine), \
+             patch.object(scheduler, 'chat', new=AsyncMock(return_value='Recorded')):
+            response = self.client.post(base + '/messages', json={'content': '@组员C 请提出易错问题'})
+        self.assertEqual(response.status_code, 200, response.text)
+        messages = self.client.get(base).json()['messages']
+        agents = [message for message in messages if message['role'] == 'agent']
+        self.assertEqual([message['sender_name'] for message in agents], ['组员C'])
+
+    def test_single_agent_meeting_only_replies_when_mentioned(self):
+        room = self.client.post('/api/v1/meetings', json={
+            'class_course_id': 1, 'name': 'Single AI', 'agent_mode': 'single',
+        }).json()
+        self.assertEqual(room['agent_mode'], 'single')
+        base = f"/api/v1/meetings/{room['id']}"
+        self.client.post(base + '/messages', json={'content': '先记录普通聊天'})
+        with patch.object(scheduler, 'engine', self.engine), \
+             patch.object(scheduler, 'chat', new=AsyncMock(return_value='Recorded')):
+            asyncio.run(scheduler.process(room['id'], force=True))
+        self.assertEqual([row['role'] for row in self.client.get(base).json()['messages']], ['user'])
+
+        with patch.object(scheduler, 'engine', self.engine), \
+             patch.object(scheduler, 'chat', new=AsyncMock(return_value='AI response')):
+            response = self.client.post(base + '/messages', json={'content': '@AI 请解释二叉树'})
+        self.assertEqual(response.status_code, 200, response.text)
+        agents = [row for row in self.client.get(base).json()['messages'] if row['role'] == 'agent']
+        self.assertEqual(agents[-1]['sender_name'], 'AI助手')
+
+    def test_ai_meeting_idle_prompt_is_led_by_agent_a(self):
+        room = self.client.post('/api/v1/meetings', json={
+            'class_course_id': 1, 'name': 'Idle prompt', 'room_type': 'ai_meeting',
+        }).json()
+        with Session(self.engine) as db:
+            user_message = MeetingMessage(room_id=room['id'], sender_name='Teacher', role='user',
+                                          content='我们讨论中序遍历')
+            db.add(user_message)
+            db.flush()
+            db.add(MeetingMessage(room_id=room['id'], sender_name='组员B', role='agent',
+                                  content='需要先区分普通二叉树和二叉搜索树'))
+            saved = db.get(MeetingRoom, room['id'])
+            saved.processed_message_id = user_message.id
+            saved.last_activity = datetime.utcnow() - timedelta(seconds=4)
+            db.commit()
+
+        reply = AsyncMock(return_value='大家还有哪一步没有想清楚？')
+        with patch.object(scheduler, 'engine', self.engine), \
+             patch.object(scheduler, 'chat', new=reply), \
+             patch.object(scheduler.settings, 'meeting_idle_seconds', 3):
+            asyncio.run(scheduler.process(room['id']))
+
+        detail = self.client.get(f"/api/v1/meetings/{room['id']}").json()
+        self.assertEqual(detail['messages'][-1]['sender_name'], '组员A')
+        self.assertEqual(detail['messages'][-1]['content'], '大家还有哪一步没有想清楚？')
+        prompt = reply.await_args.args[1]
+        self.assertIn('我们讨论中序遍历', prompt)
+        self.assertIn('需要先区分普通二叉树和二叉搜索树', prompt)
 
     def test_embedding_failure_does_not_leave_evaluation_pending(self):
         self.as_user(2)

@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     rag_cleanup_seconds: int = 3600
     meeting_workers: int = 4
     embed_dimensions: int = 0
-    meeting_idle_seconds: int = 30
+    meeting_idle_seconds: int = 3
     meeting_minutes_limit: int = 24000
 
 

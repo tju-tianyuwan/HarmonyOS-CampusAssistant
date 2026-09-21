@@ -2,6 +2,7 @@ import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { GlobalState } from '../service/GlobalState';
+import { MotionPreferences } from '../service/MotionPreferences';
 import { transferService } from '../service/collab/TransferService';
 import { deviceInfo } from '@kit.BasicServicesKit';
 
@@ -18,6 +19,7 @@ const TAG: string = 'EntryAbility';
  */
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    MotionPreferences.initialize(this.context);
     hilog.info(DOMAIN, TAG, 'Ability onCreate');
     this.restoreFromContinuation(want, launchParam);
   }

@@ -55,25 +55,27 @@ async def chat_stream(system: str, user: str) -> AsyncIterator[str]:
 def _mock_reply(system: str, user: str) -> str:
     if "[PRACTICE_GENERATOR]" in system:
         return _mock_practice_reply(user)
+    if "[MEETING_DISPATCHER]" in system:
+        return json.dumps(["analyst", "skeptic"])
     if "[MAS_AGENT:analyst]" in system:
         return (
-            "先把条件理清楚。以二叉树中序遍历为例，核心顺序是左子树、根节点、右子树。"
-            "如果对象是二叉搜索树，这个顺序还会产生有序序列；普通二叉树则没有这一保证。"
+            "我们先把目标定下来：本轮要区分中序遍历的固定规则和结果有序的适用条件。"
+            "组员B负责核对推导，组员C整理仍不清楚的地方，最后我来收束结论。"
         )
     if "[MAS_AGENT:skeptic]" in system:
         return (
-            "换个条件还成立吗？小研给出的遍历顺序没有问题，但要注意“中序结果有序”依赖二叉搜索树性质。"
-            "你可以试着构造一棵普通二叉树，检查其中序序列是否仍然递增。"
+            "我们把推导过程走一遍：中序遍历固定为左、根、右，但有序性还依赖二叉搜索树的大小约束。"
+            "普通二叉树没有该约束，因此不能直接推出遍历结果递增。"
         )
     if "[MAS_AGENT:connector]" in system:
         return (
-            "可以把它想成先整理左边书架，再处理桌面，最后整理右边书架。映射到递归代码，就是先调用左子树，"
-            "再访问当前节点，最后调用右子树，这个类比能帮助记住调用顺序。"
+            "这里我有一个基础问题：是不是所有二叉树中序遍历后都会有序？"
+            "我的理解是遍历顺序始终是左、根、右，但只有二叉搜索树的节点满足大小关系，所以结果才有序。"
         )
     if "[MAS_AGENT:synthesizer]" in system:
         return (
-            "我们把刚才的观点收一下：中序遍历的固定规则是左、根、右；只有二叉搜索树才保证结果有序。"
-            "建议你下一步手画一棵普通二叉树和一棵搜索树，分别写出中序序列进行对比。"
+            "我补充一个容易忽略的细节：要分别记录“遍历规则”和“结构性质”。"
+            "当前结论是中序顺序固定，而有序结果需要二叉搜索树这一额外条件；可用普通二叉树作为反例核对。"
         )
     if "关键词" in system:
         try:

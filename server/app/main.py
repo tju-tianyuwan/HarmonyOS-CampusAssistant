@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 from .config import settings
 from .db import engine, init_db, write_lock
 from .models import ClassCourse, CourseSession, Membership, Note, TranscriptSegment, User
-from .routers import analytics, auth, chat, courses, notes, practice, sessions, knowledge, meetings
+from .routers import analytics, auth, chat, courses, notes, practice, sessions, knowledge, meetings, timetable
 from .services.meetings import worker
 from .services.asr import is_asr_configured
 from .services import document_jobs, rag
@@ -22,7 +22,7 @@ app.add_middleware(
 )
 
 for r in (auth.router, courses.router, sessions.router, notes.router, chat.router, analytics.router, practice.router,
-          knowledge.router, meetings.router):
+          knowledge.router, meetings.router, timetable.router):
     app.include_router(r, prefix="/api/v1")
 
 

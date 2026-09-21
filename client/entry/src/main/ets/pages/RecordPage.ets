@@ -1,3 +1,4 @@
+import { TouchMotion } from '../common/TouchMotion';
 import { audio } from '@kit.AudioKit';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
@@ -5,6 +6,7 @@ import { AppTheme } from '../common/AppTheme';
 import { Outline, TranscriptSegment } from '../model/Models';
 import { Api } from '../service/Api';
 import { RecordingStore, RecordingDraft } from '../service/RecordingStore';
+import { closeRecordingCapture } from '../service/RecordingCapture';
 import { GlobalState } from '../service/GlobalState';
 
 interface PendingChunk { seq: number; }
@@ -29,6 +31,7 @@ const RECORD_BORDER: string = 'rgba(255,255,255,0.92)';
  */
 @Component
 export struct RecordPage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
   @StorageLink('classSubPage') classSubPage: string = 'record';
   @StorageLink('recordingActive') recordingActive: boolean = false;
   @State controlling: boolean = false;
@@ -194,6 +197,7 @@ export struct RecordPage {
       await this.capturer.start();
       this.simulated = false;
     } catch (e) {
+      this.releaseCapturer();
       throw new Error(`麦克风初始化失败：${(e as Error).message}`);
     }
   }
@@ -279,13 +283,17 @@ export struct RecordPage {
     this.recordingStore.save(draft);
   }
 
-  private async flushChunk(): Promise<void> {
+  private async flushChunk(requireSave: boolean = false): Promise<void> {
     try { this.cacheBuffers(); }
-    catch (e) { this.toast((e as Error).message); return; }
+    catch (e) {
+      if (requireSave) { throw new Error('录音缓存保存失败，请再次点击结束重试'); }
+      this.toast(`录音缓存保存失败：${(e as Error).message}`);
+      return;
+    }
     if (this.uploadPromise !== null) { return this.uploadPromise; }
     this.uploadPromise = this.drainUploads();
-    await this.uploadPromise;
-    this.uploadPromise = null;
+    try { await this.uploadPromise; }
+    finally { this.uploadPromise = null; }
   }
 
   private async drainUploads(): Promise<void> {
@@ -308,18 +316,30 @@ export struct RecordPage {
     }
   }
 
+  private async stopCapture(): Promise<void> {
+    this.stopTimers();
+    if (this.capturer !== null) {
+      try {
+        await closeRecordingCapture(this.capturer, this.recordState === 'recording');
+      } catch (e) {
+        // Keep caching if release also fails, so retrying cannot discard incoming audio.
+        if (this.recordState === 'recording') { this.startTimers(); }
+        throw new Error((e as Error).message);
+      }
+      this.capturer = null;
+    }
+    this.recordState = 'paused';
+  }
+
   private async pauseOrResume(): Promise<void> {
     if (this.controlling) { return; }
     this.controlling = true;
     try {
-      if (this.capturer === null) { throw new Error('录音设备不可用'); }
       if (this.recordState === 'recording') {
-        await this.capturer.stop();
-        this.recordState = 'paused';
-        this.stopTimers();
-        await this.flushChunk();
+        await this.stopCapture();
+        await this.flushChunk(true);
       } else if (this.recordState === 'paused') {
-        await this.capturer.start();
+        await this.initCapturer();
         this.recordState = 'recording';
         this.startTimers();
       }
@@ -328,25 +348,23 @@ export struct RecordPage {
   }
 
   private async finish(): Promise<void> {
-    if (this.controlling || this.sessionId < 0) { return; }
+    if (this.controlling || this.sessionId < 0 || this.recordState === 'finished') { return; }
     this.controlling = true;
-    this.stopTimers();
     try {
-      if (this.capturer !== null && this.recordState === 'recording') { await this.capturer.stop(); }
-      this.recordState = 'paused';
-      await this.flushChunk();
+      await this.stopCapture();
+      await this.flushChunk(true);
       if (this.uploadQueue.length > 0 || this.pendingBuffers.length > 0) { throw new Error('仍有未上传的分片，请再次点击结束以重试'); }
       await Api.post(`/sessions/${this.sessionId}/finish`);
-      this.recordingStore?.finish();
-      this.releaseCapturer();
       this.recordState = 'finished';
       this.recordingActive = false;
       GlobalState.currentSessionId = this.sessionId;
+      try { this.recordingStore?.finish(); }
+      catch (e) { this.toast('录音已保存，设备缓存暂未清理'); }
       try {
         this.segments = JSON.parse(await Api.get(`/sessions/${this.sessionId}/transcript`)) as TranscriptSegment[];
       } catch (e) { this.toast('录音已保存，转写列表暂未刷新'); }
       this.toast('录音及转写已保存');
-    } catch (e) { this.toast((e as Error).message); }
+    } catch (e) { this.toast(`录音尚未保存完成：${(e as Error).message}`); }
     finally { this.controlling = false; }
   }
 
@@ -720,7 +738,12 @@ export struct RecordPage {
         })
 
       Row({ space: AppTheme.SPACE_M }) {
-        Button(this.generatingOutline ? '生成中…' : '生成提纲')
+        Button(this.generatingOutline ? '生成中…' : '生成提纲').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .layoutWeight(1)
           .enabled(!this.generatingOutline && this.segments.length > 0)
           .backgroundColor(AppTheme.PRIMARY)
@@ -728,7 +751,12 @@ export struct RecordPage {
           .onClick(() => {
             this.generateOutline();
           })
-        Button(this.savingOutline ? '保存中…' : '保存')
+        Button(this.savingOutline ? '保存中…' : '保存').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .layoutWeight(1)
           .enabled(!this.savingOutline && this.outlineText.trim() !== '' &&
             (this.outlineData === null || this.outlineData.status !== 'published'))
@@ -739,7 +767,12 @@ export struct RecordPage {
             this.saveOutline();
           })
         if (GlobalState.canManageCurrentCourse()) {
-          Button(this.publishingOutline ? '发布中…' : '发布')
+          Button(this.publishingOutline ? '发布中…' : '发布').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
             .layoutWeight(1)
             .enabled(!this.publishingOutline && this.outlineText.trim() !== '' &&
               (this.outlineData === null || this.outlineData.status !== 'published'))
@@ -773,20 +806,50 @@ export struct RecordPage {
       Row({ space: 16 }) {
         Text(this.fmtDuration()).fontSize(28).fontWeight(FontWeight.Bold).layoutWeight(1)
         if (this.recordState === 'idle') {
-          Button('开始录音').backgroundColor(AppTheme.PRIMARY).enabled(!this.controlling).onClick(() => { this.start(); })
+          Button('开始录音').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).backgroundColor(AppTheme.PRIMARY).enabled(!this.controlling).onClick(() => { this.start(); })
         } else if (this.recordState === 'recording' || this.recordState === 'paused') {
-          Button(this.recordState === 'recording' ? '暂停' : '继续').enabled(!this.controlling).onClick(() => { this.pauseOrResume(); })
-          Button('结束').backgroundColor(AppTheme.DANGER).enabled(!this.controlling).onClick(() => { this.finish(); })
+          Button(this.recordState === 'recording' ? '暂停' : '继续').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).enabled(!this.controlling).onClick(() => { this.pauseOrResume(); })
+          Button('结束').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).backgroundColor(AppTheme.DANGER).enabled(!this.controlling).onClick(() => { this.finish(); })
         } else {
-          Button('新录音').backgroundColor(AppTheme.PRIMARY).onClick(() => { this.prepareNextRecording(); })
+          Button('新录音').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).backgroundColor(AppTheme.PRIMARY).onClick(() => { this.prepareNextRecording(); })
         }
       }.width('100%')
       if (this.uploadFailures > 0) { Text(`${this.uploadFailures} 个分片待上传`).fontColor(AppTheme.DANGER).fontSize(13) }
       Row({ space: 8 }) {
-        Button('转写').layoutWeight(1).backgroundColor(this.compactTab === 'transcript' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
+        Button('转写').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).layoutWeight(1).backgroundColor(this.compactTab === 'transcript' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
           .onClick(() => { this.compactTab = 'transcript'; })
         if (this.recordState === 'finished') {
-          Button('提纲').layoutWeight(1).backgroundColor(this.compactTab === 'outline' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
+          Button('提纲').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).layoutWeight(1).backgroundColor(this.compactTab === 'outline' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
             .onClick(() => { this.compactTab = 'outline'; })
         }
       }.width('100%')

@@ -1,11 +1,15 @@
 import { promptAction } from '@kit.ArkUI';
-import { AppTheme } from '../common/AppTheme';
+import { TouchMotion } from '../common/TouchMotion';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
+import { MobileLayout } from '../common/MobileLayout';
 import { Note } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
 
 @Component
 export struct PersonalNotePage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
+  @State columns: number = 1;
   onBack: () => void = () => {
   };
   onCreateAiNote: () => void = () => {
@@ -87,6 +91,12 @@ export struct PersonalNotePage {
         .textAlign(TextAlign.Center)
         .borderRadius(18)
         .backgroundColor(AppTheme.BG_CARD)
+        .stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'icon'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'icon')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
         .onClick(() => {
           this.onBack();
         })
@@ -154,6 +164,12 @@ export struct PersonalNotePage {
       .height('100%')
       .padding(AppTheme.SPACE_L)
       .alignItems(HorizontalAlign.Start)
+      .stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'card'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'card')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
       .onClick(() => {
         this.openNote(n);
       })
@@ -162,13 +178,19 @@ export struct PersonalNotePage {
         .fontSize(AppTheme.FONT_CAPTION)
         .fontColor(AppTheme.DANGER)
         .margin({ top: AppTheme.SPACE_L, right: AppTheme.SPACE_L })
+        .stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
         .onClick(() => {
           this.deleteNote(n);
         })
     }
-    .width(260)
-    .height(190)
-    .borderRadius(18)
+    .width('100%')
+    .height(220)
+    .borderRadius(24)
     .backgroundColor(AppTheme.BG_CARD)
     .shadow({ radius: 18, color: 'rgba(0,0,0,0.06)', offsetX: 0, offsetY: 6 })
   }
@@ -196,6 +218,12 @@ export struct PersonalNotePage {
     .borderRadius(18)
     .backgroundColor(AppTheme.BG_CARD)
     .border({ width: 1, color: AppTheme.tagBg(accent) })
+    .stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'card'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'card')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
     .onClick(() => {
       this.showCreateOptions = false;
       onTap();
@@ -238,6 +266,8 @@ export struct PersonalNotePage {
     }
     .width('100%')
     .height('100%')
+    .transition(TransitionEffect.OPACITY.combine(TransitionEffect.translate({ y: 18 }))
+      .animation({ duration: this.reduceMotion ? 0 : 220, curve: TouchMotion.enter() }))
   }
 
   @Builder
@@ -251,8 +281,14 @@ export struct PersonalNotePage {
       .textAlign(TextAlign.Center)
       .borderRadius(36)
       .backgroundColor(AppTheme.PRIMARY)
-      .shadow({ radius: 24, color: 'rgba(5,206,145,0.34)', offsetX: 0, offsetY: 10 })
-      .margin({ right: AppTheme.SPACE_XL, bottom: AppTheme.SPACE_XL })
+      .shadow({ radius: 20, color: 'rgba(21,90,165,0.20)', offsetX: 0, offsetY: 8 })
+      .margin({ right: AppTheme.SPACE_XL, bottom: 104 })
+      .stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'icon'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'icon')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
       .onClick(() => {
         this.showCreateOptions = true;
       })
@@ -276,24 +312,21 @@ export struct PersonalNotePage {
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
         } else {
-          Scroll() {
-            Flex({ wrap: FlexWrap.Wrap }) {
+          Grid() {
               ForEach(this.notes, (n: Note) => {
-                Column() {
+                GridItem() {
                   this.noteCard(n)
                 }
-                .margin({ right: AppTheme.SPACE_L, bottom: AppTheme.SPACE_L })
               }, (n: Note) => `${n.id}`)
-            }
-            .width('100%')
           }
-          .layoutWeight(1)
+          .width('100%').columnsTemplate(this.columns === 1 ? '1fr' : this.columns === 2 ? '1fr 1fr' : '1fr 1fr 1fr')
+          .rowsGap(20).columnsGap(20).layoutWeight(1).align(Alignment.Top).padding({ bottom: 80 })
           .scrollBar(BarState.Off)
         }
       }
       .width('100%')
       .height('100%')
-      .padding(AppTheme.SPACE_XL)
+      .padding(MobileLayout.studentPhone() ? 16 : AppTheme.SPACE_XL)
       .backgroundColor(AppTheme.BG_PAGE)
 
       this.fab()
@@ -304,5 +337,6 @@ export struct PersonalNotePage {
     }
     .width('100%')
     .height('100%')
+    .onAreaChange((oldArea: Area, area: Area) => { this.columns = Number(area.width) < 700 ? 1 : Number(area.width) < 1100 ? 2 : 3; })
   }
 }

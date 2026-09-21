@@ -21,6 +21,11 @@ export class GlobalState {
   /** 录音结束后跳课时详情用 */
   static currentSessionId: number = -1;
   static beforeLeaveNote: ((done: () => void) => void) | null = null;
+  static closeOutlineDetail: (() => void) | null = null;
+  static closeClassDetail: (() => void) | null = null;
+  static beforeLeaveClass: ((done: () => void) => void) | null = null;
+  static pendingNoteSessionId: number = -1;
+  static pendingOpenNoteId: number = -1;
 
   // ===== 协同能力开关（默认开启，可在设置页关闭）=====
   static nfcEnabled: boolean = true;
@@ -54,6 +59,11 @@ export class GlobalState {
     GlobalState.course = null;
     GlobalState.accessToken = '';
     GlobalState.currentSessionId = -1;
+    GlobalState.closeOutlineDetail = null;
+    GlobalState.closeClassDetail = null;
+    GlobalState.beforeLeaveClass = null;
+    GlobalState.pendingNoteSessionId = -1;
+    GlobalState.pendingOpenNoteId = -1;
     AppStorage.setOrCreate<string>('continueSnapshot', '');
     AppStorage.setOrCreate<string>('continueRestoreState', '');
   }

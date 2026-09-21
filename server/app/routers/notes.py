@@ -20,6 +20,7 @@ EVAL_SYSTEM = ('你是课堂笔记质量评估器，按相关性、正确性、�
 
 class NoteBody(BaseModel):
     class_course_id: int
+    session_id: int | None = None
     owner_id: int
     title: str = Field(min_length=1, max_length=200)
     kind: Literal["md", "handwriting"] = "md"
@@ -52,6 +53,11 @@ def list_notes(class_course_id: int, user_id: int, db: Session = Depends(get_db)
 def create_note(body: NoteBody, db: Session = Depends(get_db), user: User = Depends(current_user)):
     same_user(user, body.owner_id)
     member(db, user, body.class_course_id)
+    if body.session_id is not None:
+        from ..models import CourseSession
+        session = db.get(CourseSession, body.session_id)
+        if not session or session.class_course_id != body.class_course_id:
+            raise HTTPException(422, "关联课次不属于当前课程")
     note = Note(**body.model_dump())
     db.add(note)
     db.commit()

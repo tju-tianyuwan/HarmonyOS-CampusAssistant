@@ -8,7 +8,8 @@ from sqlmodel import Session, select
 
 from ..db import get_db, write_lock
 from ..models import ClassCourse, CourseSession, Membership, Note, Outline, PersonalWorkspace, User
-from ..services.security import current_user, same_user
+from ..services.security import current_user, same_user, member
+from ..services.course_schedule import ScheduleBody, read_schedule, replace_schedule, schedule_teacher
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 
@@ -17,6 +18,7 @@ class CreateCourse(BaseModel):
     name: str
     class_name: str
     teacher_id: int
+    schedule: ScheduleBody
 
 
 class JoinCourse(BaseModel):
@@ -108,6 +110,8 @@ def create_course(body: CreateCourse, db: Session = Depends(get_db), user: User 
     teacher = db.get(User, body.teacher_id)
     if not teacher or teacher.role != "teacher":
         raise HTTPException(403, "仅教师可创建课程集合")
+    if not body.schedule.slots:
+        raise HTTPException(422, "请至少安排一个上课时段")
     with write_lock:
         for _ in range(100):
             code = "".join(secrets.choice(string.digits) for _ in range(6))
@@ -119,9 +123,28 @@ def create_course(body: CreateCourse, db: Session = Depends(get_db), user: User 
         db.add(cc)
         db.flush()
         db.add(Membership(user_id=body.teacher_id, class_course_id=cc.id))
+        replace_schedule(db, cc, body.schedule)
         db.commit()
     db.refresh(cc)
     return cc
+
+
+@router.get("/{class_course_id}/schedule")
+def get_course_schedule(class_course_id: int, response: Response,
+                        db: Session = Depends(get_db), user: User = Depends(current_user)):
+    member(db, user, class_course_id)
+    response.headers["Cache-Control"] = "no-store"
+    return read_schedule(db, class_course_id)
+
+
+@router.put("/{class_course_id}/schedule")
+def update_course_schedule(class_course_id: int, body: ScheduleBody,
+                           db: Session = Depends(get_db), user: User = Depends(current_user)):
+    with write_lock:
+        course = schedule_teacher(db, user, class_course_id)
+        replace_schedule(db, course, body)
+        db.commit()
+        return read_schedule(db, class_course_id)
 
 
 @router.post("/join")

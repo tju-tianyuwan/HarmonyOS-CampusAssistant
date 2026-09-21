@@ -1,6 +1,9 @@
+import { TouchMotion } from '../common/TouchMotion';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
+import { MobileLayout } from '../common/MobileLayout';
+import { MobileTabs } from '../common/components/MobileTabs';
 import { ChatMessageInfo, ChatSessionInfo, KB_FALLBACK_WARNING, Note, UiChatMessage } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
@@ -19,6 +22,7 @@ interface PendingApply {
  */
 @Component
 export struct AiNotePage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
   onBack: () => void = () => {
   };
   initialNoteId: number = -1;
@@ -102,6 +106,7 @@ export struct AiNotePage {
 
   private async loadNotes(): Promise<void> {
     try {
+      const targetNoteId: number = this.initialNoteId >= 0 ? this.initialNoteId : GlobalState.pendingOpenNoteId;
       const all: Note[] = JSON.parse(await Api.get(
         `/notes?class_course_id=${GlobalState.courseId()}&user_id=${GlobalState.userId()}`)) as Note[];
       if (this.readOnly && this.initialNoteId >= 0) {
@@ -111,13 +116,15 @@ export struct AiNotePage {
         this.myNotes = all.filter((n: Note) => n.owner_id === GlobalState.userId() && n.kind === 'md');
       }
       this.refSelected = this.myNotes.map((n: Note) => false);
-      if (this.initialNoteId >= 0) {
+      if (targetNoteId >= 0) {
         for (let i = 0; i < this.myNotes.length; i++) {
-          if (this.myNotes[i].id === this.initialNoteId) {
+          if (this.myNotes[i].id === targetNoteId) {
             this.selectNote(i);
+            GlobalState.pendingOpenNoteId = -1;
             return;
           }
         }
+        GlobalState.pendingOpenNoteId = -1;
       }
       if (this.myNotes.length > 0 && this.selectedNoteIndex < 0) {
         this.selectNote(0);
@@ -150,6 +157,7 @@ export struct AiNotePage {
   private async createNote(): Promise<void> {
     interface NoteBody {
       class_course_id: number;
+      session_id: number | null;
       owner_id: number;
       title: string;
       kind: string;
@@ -158,6 +166,7 @@ export struct AiNotePage {
 
     const body: NoteBody = {
       class_course_id: GlobalState.courseId(),
+      session_id: GlobalState.pendingNoteSessionId >= 0 ? GlobalState.pendingNoteSessionId : null,
       owner_id: GlobalState.userId(),
       title: '随堂笔记',
       kind: 'md',
@@ -165,6 +174,7 @@ export struct AiNotePage {
     };
     try {
       const created: Note = JSON.parse(await Api.post('/notes', body)) as Note;
+      GlobalState.pendingNoteSessionId = -1;
       await this.loadNotes();
       if (!this.selectNoteById(created.id) && this.myNotes.length > 0) {
         this.selectNote(this.myNotes.length - 1);
@@ -673,7 +683,7 @@ export struct AiNotePage {
         .scrollBar(BarState.Off)
       }
     }
-    .width(220)
+    .width(this.compact ? '100%' : 220)
     .height('100%')
     .padding(AppTheme.SPACE_M)
     .borderRadius(AppTheme.RADIUS_CARD)
@@ -690,8 +700,18 @@ export struct AiNotePage {
           if (this.dirty) { Text('未保存').fontSize(12).fontColor(AppTheme.WARNING) }
           Blank()
           if (this.canEditCurrent()) {
-            Button('保存').backgroundColor(AppTheme.PRIMARY).onClick(() => { this.saveNote(); })
-            Button('删除').fontColor(AppTheme.DANGER).backgroundColor(Color.Transparent).onClick(() => { this.deleteCurrentNote(); })
+            Button('保存').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).backgroundColor(AppTheme.PRIMARY).onClick(() => { this.saveNote(); })
+            Button('删除').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).fontColor(AppTheme.DANGER).backgroundColor(Color.Transparent).onClick(() => { this.deleteCurrentNote(); })
           }
         }.width('100%')
       } else {
@@ -710,7 +730,12 @@ export struct AiNotePage {
           Text('未保存').fontSize(AppTheme.FONT_CAPTION).fontColor(AppTheme.WARNING)
         }
         if (this.canEditCurrent()) {
-          Button('重命名')
+          Button('重命名').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
             .fontSize(AppTheme.FONT_BODY)
             .backgroundColor(AppTheme.BG_CARD)
             .fontColor(AppTheme.TEXT_SECONDARY)
@@ -718,14 +743,24 @@ export struct AiNotePage {
             .onClick(() => {
               this.renameNote();
             })
-          Button('保存')
+          Button('保存').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
             .fontSize(AppTheme.FONT_BODY)
             .backgroundColor(AppTheme.PRIMARY)
             .borderRadius(999)
             .onClick(() => {
               this.saveNote();
             })
-          Button('删除')
+          Button('删除').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
             .fontSize(AppTheme.FONT_BODY)
             .backgroundColor(AppTheme.tagBg(AppTheme.DANGER))
             .fontColor(AppTheme.DANGER)
@@ -763,7 +798,12 @@ export struct AiNotePage {
         Column({ space: AppTheme.SPACE_M }) {
           Text('还没有笔记').fontSize(AppTheme.FONT_BODY).fontColor(AppTheme.TEXT_TERTIARY)
           if (!this.readOnly) {
-            Button('新建随堂笔记')
+            Button('新建随堂笔记').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
               .backgroundColor(AppTheme.PRIMARY)
               .borderRadius(999)
               .onClick(() => {
@@ -945,7 +985,12 @@ export struct AiNotePage {
             this.pending = { mode: 'none', start: 0, end: 0 };
             this.send(q);
           })
-        Button(this.asking ? '停止' : '发送')
+        Button(this.asking ? '停止' : '发送').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .fontSize(AppTheme.FONT_BODY)
           .enabled(!this.readOnly)
           .backgroundColor(AppTheme.PRIMARY)
@@ -960,7 +1005,7 @@ export struct AiNotePage {
       }
       .width('100%')
     }
-    .width(320)
+    .width(this.compact ? '100%' : 290)
     .height('100%')
     .padding(AppTheme.SPACE_M)
     .borderRadius(AppTheme.RADIUS_CARD)
@@ -971,11 +1016,31 @@ export struct AiNotePage {
     Column({ space: AppTheme.SPACE_M }) {
       this.pageHeader()
       if (this.compact) {
+        if (MobileLayout.studentPhone()) {
+          MobileTabs({ labels: ['笔记列表', '编辑', 'AI'], keys: ['list', 'editor', 'ai'], selected: this.compactTab,
+            onSelect: (key: string) => { this.compactTab = key; } })
+        } else {
         Row({ space: 8 }) {
-          Button('笔记列表').layoutWeight(1).onClick(() => { this.compactTab = 'list'; })
-          Button('编辑').layoutWeight(1).onClick(() => { this.compactTab = 'editor'; })
-          Button('AI').layoutWeight(1).onClick(() => { this.compactTab = 'ai'; })
+          Button('笔记列表').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).layoutWeight(1).onClick(() => { this.compactTab = 'list'; })
+          Button('编辑').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).layoutWeight(1).onClick(() => { this.compactTab = 'editor'; })
+          Button('AI').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).layoutWeight(1).onClick(() => { this.compactTab = 'ai'; })
         }.width('100%')
+        }
         Row() {
           if (this.compactTab === 'list') { this.leftPaneView() }
           else if (this.compactTab === 'ai') { this.aiPanelView() }

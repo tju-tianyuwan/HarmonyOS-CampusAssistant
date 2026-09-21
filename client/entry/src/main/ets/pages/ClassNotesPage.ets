@@ -1,11 +1,15 @@
 import { promptAction } from '@kit.ArkUI';
-import { AppTheme } from '../common/AppTheme';
+import { TouchMotion } from '../common/TouchMotion';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
+import { MobileLayout } from '../common/MobileLayout';
 import { Note } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
 
 @Component
 export struct ClassNotesPage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
+  @State columns: number = 1;
   onBack: () => void = () => {
   };
   onOpenAiNote: (noteId: number) => void = () => {
@@ -53,6 +57,12 @@ export struct ClassNotesPage {
         .textAlign(TextAlign.Center)
         .borderRadius(18)
         .backgroundColor(AppTheme.BG_CARD)
+        .stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'icon'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'icon')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
         .onClick(() => {
           this.onBack();
         })
@@ -106,13 +116,19 @@ export struct ClassNotesPage {
         .fontSize(10)
         .fontColor(AppTheme.TEXT_TERTIARY)
     }
-    .width(260)
-    .height(190)
+    .width('100%')
+    .height(220)
     .padding(AppTheme.SPACE_L)
-    .borderRadius(18)
+    .borderRadius(24)
     .backgroundColor(AppTheme.BG_CARD)
     .shadow({ radius: 18, color: 'rgba(0,0,0,0.06)', offsetX: 0, offsetY: 6 })
     .alignItems(HorizontalAlign.Start)
+    .stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'card'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'card')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
     .onClick(() => {
       if (n.kind === 'md') {
         this.onOpenAiNote(n.id);
@@ -139,24 +155,22 @@ export struct ClassNotesPage {
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
       } else {
-        Scroll() {
-          Flex({ wrap: FlexWrap.Wrap }) {
+        Grid() {
             ForEach(this.notes, (n: Note) => {
-              Column() {
+              GridItem() {
                 this.noteCard(n)
               }
-              .margin({ right: AppTheme.SPACE_L, bottom: AppTheme.SPACE_L })
             }, (n: Note) => `${n.id}`)
-          }
-          .width('100%')
         }
-        .layoutWeight(1)
+        .width('100%').columnsTemplate(this.columns === 1 ? '1fr' : this.columns === 2 ? '1fr 1fr' : '1fr 1fr 1fr')
+        .rowsGap(20).columnsGap(20).layoutWeight(1).align(Alignment.Top)
         .scrollBar(BarState.Off)
       }
     }
     .width('100%')
     .height('100%')
-    .padding(AppTheme.SPACE_XL)
+    .padding(MobileLayout.studentPhone() ? 16 : AppTheme.SPACE_XL)
     .backgroundColor(AppTheme.BG_PAGE)
+    .onAreaChange((oldArea: Area, area: Area) => { this.columns = Number(area.width) < 700 ? 1 : Number(area.width) < 1100 ? 2 : 3; })
   }
 }

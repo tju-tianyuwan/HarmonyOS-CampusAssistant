@@ -31,7 +31,7 @@ def configured() -> bool:
 
 def embed(texts: list[str]) -> list[list[float]]:
     if not configured():
-        raise HTTPException(409, "尚未配置 Embedding，当前使用关键词检索")
+        raise HTTPException(409, "尚未配置智能检索服务，当前仍可使用普通关键词搜索")
     options = {"dimensions": settings.embed_dimensions} if settings.embed_dimensions else {}
     try:
         with OpenAI(api_key=settings.embed_api_key, base_url=settings.embed_base_url or None,
@@ -42,7 +42,7 @@ def embed(texts: list[str]) -> list[list[float]]:
             raise ValueError("empty embeddings")
         return vectors
     except Exception as exc:
-        raise HTTPException(502, "Embedding 服务连接失败，请检查服务端配置") from exc
+        raise HTTPException(502, "智能检索服务连接失败，请联系系统管理员检查服务配置") from exc
 
 
 def chroma_client():
@@ -171,7 +171,7 @@ def query(class_course_id: int, question: str, top_k: int = 4, *, db: Session) -
                     ranks[index] = ranks.get(index, 0) + 1 / (60 + rank)
             mode = "hybrid"
         except Exception:
-            warning = "向量检索不可用或索引需重建，本次使用关键词检索"
+            warning = "智能检索暂时不可用或需要修复，本次已改用普通关键词搜索"
     return [{**chunks[i], "retrieval_mode": mode, "warning": warning}
             for i in sorted(ranks, key=ranks.get, reverse=True)[:top_k]]
 

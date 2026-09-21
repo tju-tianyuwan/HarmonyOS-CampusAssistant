@@ -1,3 +1,4 @@
+import { TouchMotion } from '../common/TouchMotion';
 import { promptAction } from '@kit.ArkUI';
 import { AppTheme } from '../common/AppTheme';
 import { AppCard } from '../common/components/AppCard';
@@ -11,6 +12,7 @@ import { GlobalState } from '../service/GlobalState';
  */
 @Component
 export struct ReviewPage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
   @State pendingList: Outline[] = [];
   @State selectedIndex: number = -1;
   @State editText: string = '';
@@ -170,7 +172,12 @@ export struct ReviewPage {
             })
 
           Row({ space: AppTheme.SPACE_M }) {
-            Button('保存修改')
+            Button('保存修改').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
               .layoutWeight(1)
               .enabled(!this.busy)
               .backgroundColor(AppTheme.BG_CARD)
@@ -179,7 +186,12 @@ export struct ReviewPage {
               .onClick(() => {
                 this.saveEdit();
               })
-            Button('发布到共享池')
+            Button('发布到共享池').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
               .layoutWeight(1)
               .enabled(!this.busy)
               .backgroundColor(AppTheme.PRIMARY)
@@ -187,7 +199,12 @@ export struct ReviewPage {
               .onClick(() => {
                 this.review('publish');
               })
-            Button('退回')
+            Button('退回').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
               .layoutWeight(1)
               .enabled(!this.busy)
               .fontColor(AppTheme.DANGER)

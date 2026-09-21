@@ -1,5 +1,9 @@
+import { TouchMotion } from '../common/TouchMotion';
+import { MotionPage } from '../common/components/MotionPage';
 import { promptAction } from '@kit.ArkUI';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
+import { MobileLayout } from '../common/MobileLayout';
+import { MobileTabs } from '../common/components/MobileTabs';
 import {
   AiAgentInfo,
   ChatMessageInfo,
@@ -47,6 +51,7 @@ const DEFAULT_MAS_AGENTS: AiAgentInfo[] = [
 
 @Component
 export struct CourseAiPage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
   @State chatSessions: ChatSessionInfo[] = [];
   @State selectedChatIndex: number = -1;
   @State messages: UiChatMessage[] = [];
@@ -76,20 +81,9 @@ export struct CourseAiPage {
   }
 
   aboutToAppear(): void {
+    this.compactTab = GlobalState.isTeacher() ? 'insights' : 'chat';
     this.loadChatSessions();
-    if (!GlobalState.isTeacher()) {
-      this.loadAgents();
-    }
-    this.pageReady = false;
-    this.introTimer = setTimeout(() => {
-      this.pageReady = true;
-      this.introTimer = -1;
-    }, 24);
-    if (this.pulseTimer < 0) {
-      this.pulseTimer = setInterval(() => {
-        this.pulse = !this.pulse;
-      }, 1500);
-    }
+    this.pageReady = true;
     if (GlobalState.isTeacher()) {
       this.loadAnalytics();
       if (this.analyticsTimer < 0) {
@@ -537,7 +531,7 @@ export struct CourseAiPage {
         this.replaceLastMessage(next);
         this.asking = false;
       }
-    }, GlobalState.isTeacher() ? 'single' : 'mas');
+    }, 'single');
   }
 
   @Builder
@@ -574,27 +568,25 @@ export struct CourseAiPage {
       Row() {
         Column({ space: AppTheme.SPACE_M }) {
           Row({ space: 8 }) {
-            Text(GlobalState.isTeacher() ? 'COURSE AI' : 'COURSE MAS')
+            Text('COURSE AI')
               .fontSize(11)
               .fontWeight(FontWeight.Bold)
               .fontColor('#121818')
               .padding({ left: 12, right: 12, top: 5, bottom: 5 })
               .borderRadius(999)
               .backgroundColor(AI_CYAN)
-            Text(GlobalState.isTeacher() ? '仅依据本课程知识库' : `${this.agents.length} 位 AI 共同讨论`)
+            Text('仅依据本课程知识库')
               .fontSize(11)
               .fontColor('rgba(18,24,24,0.58)')
               .padding({ left: 12, right: 12, top: 5, bottom: 5 })
               .borderRadius(999)
               .backgroundColor('rgba(18,24,24,0.06)')
           }
-          Text(GlobalState.isTeacher() ? 'AI' : 'AI 圆桌')
+          Text(GlobalState.isTeacher() ? 'AI数据' : 'AI 问答')
             .fontSize(48)
             .fontWeight(FontWeight.Bold)
             .fontColor(AppTheme.INK)
-          Text(GlobalState.isTeacher() ?
-            '把课堂提纲、共享笔记和提问上下文编织成一次更可靠的课程问答。' :
-            '让不同性格的 AI 和你一起讨论课程问题，在观点碰撞中理解得更深。')
+          Text('上传课程问题，由单一 AI 助手结合课堂提纲、共享笔记和课程知识库回答。')
             .fontSize(AppTheme.FONT_BODY)
             .fontColor('rgba(18,24,24,0.56)')
             .maxLines(1)
@@ -646,17 +638,10 @@ export struct CourseAiPage {
         .rotate({ angle: 85 })
         .backgroundColor('rgba(255,184,77,0.38)')
         .position({ x: 87, y: 104 })
-      if (GlobalState.isTeacher()) {
-        this.glyphNode('问', AI_BLUE, 34, 56, 48)
-        this.glyphNode('AI', AI_VIOLET, 92, 78, 58)
-        this.glyphNode('课', AppTheme.PRIMARY, 148, 40, 42)
-        this.glyphNode('记', AI_AMBER, 98, 144, 38)
-      } else {
-        this.glyphNode('研', AI_BLUE, 34, 56, 48)
-        this.glyphNode('问', AI_VIOLET, 92, 78, 58)
-        this.glyphNode('拓', AI_AMBER, 148, 40, 42)
-        this.glyphNode('结', AppTheme.PRIMARY, 98, 144, 38)
-      }
+      this.glyphNode('问', AI_BLUE, 34, 56, 48)
+      this.glyphNode('AI', AI_VIOLET, 92, 78, 58)
+      this.glyphNode('课', AppTheme.PRIMARY, 148, 40, 42)
+      this.glyphNode('记', AI_AMBER, 98, 144, 38)
     }
     .width(210)
     .height(190)
@@ -692,7 +677,7 @@ export struct CourseAiPage {
         Text('+')
           .fontSize(20)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#121818')
+          .fontColor('#FFFFFF')
           .width(34)
           .height(34)
           .textAlign(TextAlign.Center)
@@ -705,7 +690,7 @@ export struct CourseAiPage {
       }
       .width('100%')
 
-      Text('圆桌会记住最近几轮观点与学习偏好')
+      Text('回顾本课程中的提问与解答')
         .fontSize(AppTheme.FONT_CAPTION)
         .fontColor(AppTheme.TEXT_TERTIARY)
         .width('100%')
@@ -769,7 +754,7 @@ export struct CourseAiPage {
         .scrollBar(BarState.Off)
       }
     }
-    .width(278)
+    .width(this.compact ? '100%' : 280)
     .height('100%')
     .padding(AppTheme.SPACE_L)
     .borderRadius(30)
@@ -1085,7 +1070,7 @@ export struct CourseAiPage {
             .fontSize(AppTheme.FONT_BODY)
             .fontWeight(FontWeight.Bold)
             .fontColor(AppTheme.INK)
-          Text(`轮询更新 · ${this.updatedAtText()}`)
+          Text(`更新于 ${this.updatedAtText()}`)
             .fontSize(AppTheme.FONT_CAPTION)
             .fontColor(AppTheme.TEXT_TERTIARY)
         }
@@ -1196,7 +1181,7 @@ export struct CourseAiPage {
           Text(this.speakerName(m.role))
             .fontSize(AppTheme.FONT_CAPTION)
             .fontWeight(FontWeight.Medium)
-            .fontColor(this.speakerColor(m.role))
+            .fontColor(m.role === 'user' ? '#FFFFFF' : this.speakerColor(m.role))
           if (m.role !== 'user') {
             Text(this.speakerTitle(m.role))
               .fontSize(10)
@@ -1249,10 +1234,10 @@ export struct CourseAiPage {
             .lineHeight(18)
         }
       }
-      .constraintSize({ maxWidth: '76%' })
+      .width(m.role === 'user' ? '72%' : '82%')
       .padding(AppTheme.SPACE_M)
       .borderRadius(22)
-      .backgroundColor(m.role === 'user' ? AI_BLUE : AI_GLASS)
+      .backgroundColor(m.role === 'user' ? (GlobalState.isTeacher() ? AI_BLUE : AppTheme.PRIMARY) : AI_GLASS)
       .border({
         width: 1.1,
         color: m.role === 'user' ? 'rgba(255,255,255,0.26)' : this.speakerColor(m.role)
@@ -1283,12 +1268,12 @@ export struct CourseAiPage {
       .height(190)
       .scale({ x: 0.82, y: 0.82 })
       }
-      Text('发起一场课程圆桌')
+      Text('开始课程问答')
         .fontSize(this.compact ? 18 : 24)
         .fontWeight(FontWeight.Bold)
         .fontColor(AppTheme.INK)
       if (!this.compact) {
-        Text('小研、小问、小拓和小结会共享课程资料，从分析、质疑、类比和总结四个角度与你讨论。')
+        Text('输入课程问题，AI 将结合课程知识库给出回答，并标注引用来源。')
         .fontSize(AppTheme.FONT_BODY)
         .fontColor(AppTheme.TEXT_SECONDARY)
         .textAlign(TextAlign.Center)
@@ -1314,14 +1299,14 @@ export struct CourseAiPage {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           if (!this.compact) {
-            Text('所有成员共享课程知识库，但会保留不同观点与表达方式')
+            Text('单一 AI 助手，仅依据本课程知识库回答')
               .fontSize(AppTheme.FONT_CAPTION)
               .fontColor(AppTheme.TEXT_TERTIARY)
           }
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
-        Text(this.asking ? '讨论中' : '圆桌就绪')
+        Text(this.asking ? '正在回答' : 'AI 已就绪')
           .fontSize(AppTheme.FONT_CAPTION)
           .fontColor(this.asking ? AI_VIOLET : AppTheme.PRIMARY)
           .padding({ left: 12, right: 12, top: 5, bottom: 5 })
@@ -1330,7 +1315,7 @@ export struct CourseAiPage {
       }
       .width('100%')
 
-      this.agentRoster()
+      if (GlobalState.isTeacher()) { this.agentRoster() }
 
       if (this.messages.length === 0) {
         this.emptyChatState()
@@ -1348,7 +1333,7 @@ export struct CourseAiPage {
       }
 
       Row({ space: AppTheme.SPACE_S }) {
-        TextInput({ text: this.inputText, placeholder: '把你的问题或观点抛给圆桌…' })
+        TextInput({ text: this.inputText, placeholder: '输入你的课程问题…' })
           .layoutWeight(1)
           .fontSize(AppTheme.FONT_BODY)
           .height(46)
@@ -1360,11 +1345,16 @@ export struct CourseAiPage {
           .onSubmit(() => {
             this.send();
           })
-        Button(this.asking ? '停止' : '发起讨论')
+        Button(this.asking ? '停止' : '发送').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .fontSize(AppTheme.FONT_BODY)
           .enabled(true)
           .fontColor('#FFFFFF')
-          .width(this.compact ? 88 : 112)
+          .width(this.compact ? 72 : 96)
           .height(46)
           .backgroundColor(this.asking ? AI_VIOLET : AppTheme.PRIMARY)
           .borderRadius(999)
@@ -1596,7 +1586,12 @@ export struct CourseAiPage {
           .onSubmit(() => {
             this.send();
           })
-        Button(this.asking ? '停止' : '问')
+        Button(this.asking ? '停止' : '问').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .fontSize(AppTheme.FONT_CAPTION)
           .enabled(true)
           .fontColor('#FFFFFF')
@@ -1624,29 +1619,20 @@ export struct CourseAiPage {
     Stack() {
       if (this.compact) {
         Column({ space: 10 }) {
-          Row({ space: 8 }) {
-            Button('对话').layoutWeight(1)
-              .backgroundColor(this.compactTab === 'chat' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
-              .fontColor(this.compactTab === 'chat' ? '#FFFFFF' : AppTheme.PRIMARY_DEEP)
-              .onClick(() => { this.compactTab = 'chat'; })
-            Button('历史').layoutWeight(1)
-              .backgroundColor(this.compactTab === 'history' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
-              .fontColor(this.compactTab === 'history' ? '#FFFFFF' : AppTheme.PRIMARY_DEEP)
-              .onClick(() => { this.compactTab = 'history'; })
-            if (GlobalState.isTeacher()) {
-              Button('学情').layoutWeight(1)
-                .backgroundColor(this.compactTab === 'insights' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
-                .fontColor(this.compactTab === 'insights' ? '#FFFFFF' : AppTheme.PRIMARY_DEEP)
-                .onClick(() => { this.compactTab = 'insights'; })
-            }
-          }.width('100%')
+          Text(GlobalState.isTeacher() ? 'AI数据' : '课程 AI').fontSize(22).fontWeight(FontWeight.Bold).width('100%')
+          MobileTabs({ labels: GlobalState.isTeacher() ? ['学情', '对话', '历史'] : ['对话', '历史'],
+            keys: GlobalState.isTeacher() ? ['insights', 'chat', 'history'] : ['chat', 'history'], selected: this.compactTab,
+            onSelect: (key: string) => { this.compactTab = key; } })
           Row() {
+            MotionPage({ navigationKey: `0|${this.compactTab}`, tabNavigation: true }) {
             if (this.compactTab === 'insights') { this.teacherInsightPane() }
             else if (this.compactTab === 'history') { this.historyPane() }
             else { this.chatPane() }
+            }
           }.width('100%').layoutWeight(1)
         }.width('100%').height('100%').padding(12)
       } else {
+      if (GlobalState.isTeacher()) {
       Column()
         .width('100%')
         .height('100%')
@@ -1665,8 +1651,16 @@ export struct CourseAiPage {
         .rotate({ angle: -18 })
         .backgroundColor('rgba(5,206,145,0.10)')
         .position({ x: -180, y: -120 })
+      }
       Column({ space: AppTheme.SPACE_L }) {
-        this.pageHeader()
+        if (GlobalState.isTeacher()) {
+          Text('AI数据').fontSize(24).fontWeight(FontWeight.Bold).width('100%')
+        } else {
+          Column({ space: 8 }) {
+            Text('课程 AI').fontSize(30).fontWeight(FontWeight.Bold).fontColor(AppTheme.TEXT_PRIMARY)
+            Text('结合课程资料，陪你理解知识、理清思路').fontSize(15).fontColor(AppTheme.TEXT_SECONDARY)
+          }.width('100%').alignItems(HorizontalAlign.Start)
+        }
         if (GlobalState.isTeacher()) {
           Row({ space: AppTheme.SPACE_L }) {
             this.teacherInsightPane()
@@ -1687,16 +1681,12 @@ export struct CourseAiPage {
       }
       .width('100%')
       .height('100%')
-      .padding({ left: AppTheme.SPACE_XXL, right: AppTheme.SPACE_XXL, top: 28, bottom: AppTheme.SPACE_XXL })
-      .opacity(this.pageReady ? 1 : 0)
-      .translate({ x: 0, y: this.pageReady ? 0 : 24 })
-      .scale({ x: this.pageReady ? 1 : 0.986, y: this.pageReady ? 1 : 0.986 })
-      .animation({ duration: 360, curve: Curve.EaseOut })
+      .padding({ left: 24, right: 24, top: 20, bottom: 24 })
       }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(AI_BG)
+    .backgroundColor(GlobalState.isTeacher() ? AI_BG : AppTheme.BG_PAGE)
     .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 1000 || Number(newArea.height) < 550; })
   }
 }

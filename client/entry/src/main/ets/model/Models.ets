@@ -41,11 +41,29 @@ export interface CourseSession {
   id: number;
   class_course_id: number;
   title: string;
+  ai_title?: string;
   creator_id: number;
   status: string; // recording | transcribing | done
   created_at: string;
   outline_kind?: string; // official | personal | self | ''
   outline_status?: string;
+  resource_count?: number;
+  personal_notes?: SessionNoteSummary[];
+}
+
+export interface SessionNoteSummary {
+  id: number;
+  title: string;
+  kind: string;
+}
+
+export interface SessionResource {
+  id: number;
+  session_id: number;
+  filename: string;
+  chars: number;
+  content?: string;
+  created_at: string;
 }
 
 export interface TranscriptSegment {
@@ -71,6 +89,7 @@ export interface Outline {
 export interface Note {
   id: number;
   class_course_id: number;
+  session_id?: number;
   owner_id: number;
   title: string;
   kind: string; // md | handwriting

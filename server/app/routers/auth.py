@@ -36,6 +36,7 @@ class Registration(Credentials):
     name: str = Field(min_length=1, max_length=40)
     password: str = Field(min_length=8, max_length=128)
     code: str = Field(default="", max_length=6)
+    role: Literal["teacher", "student"] = "student"
 
 
 class CodeRequest(BaseModel):
@@ -145,7 +146,7 @@ def register(body: Registration, request: Request, db: Session = Depends(get_db)
                 db.commit()
                 raise HTTPException(400, "验证码错误")
             db.delete(code)
-        user = User(name=body.name.strip(), role="student")
+        user = User(name=body.name.strip(), role=body.role)
         db.add(user)
         db.flush()
         db.add(Account(user_id=user.id, login_key=key, password_hash=hash_password(body.password),

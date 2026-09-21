@@ -1,16 +1,20 @@
+import { TouchMotion } from '../common/TouchMotion';
+import { MotionPage } from '../common/components/MotionPage';
 import { promptAction } from '@kit.ArkUI';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
+import { MobileLayout } from '../common/MobileLayout';
+import { MobileTabs } from '../common/components/MobileTabs';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
 
 const PRACTICE_BG: string = '#F2F7F6';
 const PRACTICE_PANEL: string = '#FFFFFF';
 const PRACTICE_SOFT: string = '#F5FFFB';
-const PRACTICE_BLUE: string = '#3F7DFF';
-const PRACTICE_CYAN: string = '#12BFE8';
-const PRACTICE_AMBER: string = '#FFB84D';
-const PRACTICE_CORAL: string = '#FF6F61';
-const PRACTICE_VIOLET: string = '#7A63F3';
+const PRACTICE_BLUE: string = '#155AA5';
+const PRACTICE_CYAN: string = '#187E85';
+const PRACTICE_AMBER: string = '#95601A';
+const PRACTICE_CORAL: string = '#BA4141';
+const PRACTICE_VIOLET: string = '#526D83';
 const PRACTICE_BORDER: string = 'rgba(31,62,68,0.09)';
 const PRACTICE_SHADOW: string = 'rgba(31,62,68,0.10)';
 
@@ -138,6 +142,7 @@ const QUESTION_BANK: PracticeQuestion[] = [
 
 @Component
 export struct PracticePage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
   @State selectedMode: string = '智能组卷';
   @State selectedTopic: string = '综合';
   @State selectedDifficulty: string = '综合';
@@ -147,19 +152,16 @@ export struct PracticePage {
   @State currentIndex: number = 0;
   @State selectedAnswers: number[] = [-1, -1, -1, -1, -1];
   @State submittedFlags: boolean[] = [false, false, false, false, false];
+  @State answeredTotal: number = 0;
+  @State correctTotal: number = 0;
   @State generating: boolean = false;
   @State compact: boolean = false;
   @State compactTab: string = 'questions';
   @State pageReady: boolean = false;
-  @State pressedChoice: number = -1;
   private introTimer: number = -1;
 
   aboutToAppear(): void {
-    this.pageReady = false;
-    this.introTimer = setTimeout(() => {
-      this.pageReady = true;
-      this.introTimer = -1;
-    }, 24);
+    this.pageReady = true;
   }
 
   aboutToDisappear(): void {
@@ -232,6 +234,8 @@ export struct PracticePage {
       this.questionIndexes = next;
       this.selectedAnswers = this.blankNumbers(next.length, -1);
       this.submittedFlags = this.blankBooleans(next.length);
+      this.answeredTotal = 0;
+      this.correctTotal = 0;
       promptAction.showToast({ message: `已生成 ${next.length} 道${this.selectedTopic}练习题` });
     } catch (e) {
       promptAction.showToast({ message: `生成题目失败：${(e as Error).message}`, duration: 3500 });
@@ -261,39 +265,14 @@ export struct PracticePage {
     if (this.currentSelectedAnswer() < 0 || this.currentSubmitted()) {
       return;
     }
+    const correct: boolean = this.currentSelectedAnswer() === this.currentQuestion().answer;
     const next: boolean[] = this.submittedFlags.slice();
     next[this.currentIndex] = true;
     this.submittedFlags = next;
-  }
-
-  private answeredCount(): number {
-    let count: number = 0;
-    for (let i = 0; i < this.submittedFlags.length; i++) {
-      if (this.submittedFlags[i]) {
-        count++;
-      }
+    this.answeredTotal += 1;
+    if (correct) {
+      this.correctTotal += 1;
     }
-    return count;
-  }
-
-  private correctCount(): number {
-    let count: number = 0;
-    const limit: number = Math.min(
-      this.submittedFlags.length,
-      Math.min(this.selectedAnswers.length, this.questionIndexes.length)
-    );
-    for (let i = 0; i < limit; i++) {
-      if (this.submittedFlags[i] &&
-        this.selectedAnswers[i] === this.questionBank[this.questionIndexes[i]].answer) {
-        count++;
-      }
-    }
-    return count;
-  }
-
-  private accuracyText(): string {
-    const answered: number = this.answeredCount();
-    return answered === 0 ? '0%' : `${Math.round(this.correctCount() * 100 / answered)}%`;
   }
 
   private progressWidth(): string {
@@ -361,7 +340,12 @@ export struct PracticePage {
 
   @Builder
   modeButton(label: string) {
-    Button(label)
+    Button(label).stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
       .fontSize(AppTheme.FONT_CAPTION)
       .fontWeight(this.selectedMode === label ? FontWeight.Bold : FontWeight.Medium)
       .fontColor(this.selectedMode === label ? '#FFFFFF' : AppTheme.TEXT_SECONDARY)
@@ -419,18 +403,25 @@ export struct PracticePage {
   }
 
   @Builder
-  statValue(value: string, label: string, color: string) {
-    Column({ space: 3 }) {
-      Text(value)
-        .fontSize(22)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(color)
-      Text(label)
-        .fontSize(10)
-        .fontColor(AppTheme.TEXT_TERTIARY)
-    }
-    .layoutWeight(1)
-    .alignItems(HorizontalAlign.Start)
+  answerStatistics() {
+    // Read @State inside Text: positional @Builder values retain their initial snapshot.
+    Row() {
+      Column({ space: 3 }) {
+        Text(`${this.answeredTotal}`)
+          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(PRACTICE_BLUE)
+        Text('已答').fontSize(10).fontColor(AppTheme.TEXT_TERTIARY)
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      Column({ space: 3 }) {
+        Text(`${this.correctTotal}`)
+          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(AppTheme.SUCCESS)
+        Text('正确').fontSize(10).fontColor(AppTheme.TEXT_TERTIARY)
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      Column({ space: 3 }) {
+        Text(`${this.answeredTotal === 0 ? 0 : Math.round(this.correctTotal * 100 / this.answeredTotal)}%`)
+          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(PRACTICE_VIOLET)
+        Text('正确率').fontSize(10).fontColor(AppTheme.TEXT_TERTIARY)
+      }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+    }.width('100%').margin({ top: 22, bottom: 22 })
   }
 
   @Builder
@@ -469,39 +460,13 @@ export struct PracticePage {
   @Builder
   practiceHeader() {
     Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .borderRadius(28)
-        .linearGradient({
-          angle: 118,
-          colors: [
-            ['#FFFFFF', 0],
-            ['#F2FFFA', 0.54],
-            ['#EEF4FF', 1]
-          ]
-        })
-      Column()
-        .width(240)
-        .height(92)
-        .borderRadius(28)
-        .rotate({ angle: -8 })
-        .backgroundColor('rgba(5,206,145,0.10)')
-        .position({ x: -52, y: -40 })
-      Column()
-        .width(210)
-        .height(88)
-        .borderRadius(24)
-        .rotate({ angle: 9 })
-        .backgroundColor('rgba(63,125,255,0.10)')
-        .position({ x: 530, y: 44 })
       Row() {
         Column({ space: 5 }) {
           Row({ space: 8 }) {
-            Text('PRACTICE LAB')
+            Text('专注练习')
               .fontSize(10)
               .fontWeight(FontWeight.Bold)
-              .fontColor(AppTheme.INK)
+              .fontColor(AppTheme.BG_WHITE)
               .padding({ left: 10, right: 10, top: 4, bottom: 4 })
               .borderRadius(999)
               .backgroundColor(AppTheme.PRIMARY)
@@ -547,9 +512,9 @@ export struct PracticePage {
     .width('100%')
     .height(118)
     .clip(true)
-    .borderRadius(28)
-    .border({ width: 1.2, color: 'rgba(255,255,255,0.92)' })
-    .shadow({ radius: 26, color: PRACTICE_SHADOW, offsetX: 0, offsetY: 10 })
+    .borderRadius(16)
+    .backgroundColor(AppTheme.BG_CARD)
+    .border({ width: 1, color: AppTheme.DIVIDER })
   }
 
   @Builder
@@ -567,13 +532,7 @@ export struct PracticePage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
 
-      Row() {
-        this.statValue(`${this.answeredCount()}`, '已答', PRACTICE_BLUE)
-        this.statValue(`${this.correctCount()}`, '正确', AppTheme.SUCCESS)
-        this.statValue(this.accuracyText(), '正确率', PRACTICE_VIOLET)
-      }
-      .width('100%')
-      .margin({ top: 22, bottom: 22 })
+      this.answerStatistics()
 
       Text('练习模式')
         .fontSize(11)
@@ -623,7 +582,12 @@ export struct PracticePage {
 
       Blank()
 
-      Button(this.generating ? '正在生成…' : '✦  AI 出题')
+      Button(this.generating ? '正在生成…' : '✦  AI 出题').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
         .fontSize(AppTheme.FONT_BODY)
         .fontWeight(FontWeight.Bold)
         .fontColor('#FFFFFF')
@@ -636,7 +600,7 @@ export struct PracticePage {
           this.generateQuestions();
         })
     }
-    .width(244)
+    .width(this.compact ? '100%' : 224)
     .height('100%')
     .padding({ left: 22, right: 22, top: 26, bottom: 24 })
     .borderRadius(28)
@@ -664,26 +628,17 @@ export struct PracticePage {
         .fontWeight(index === this.currentSelectedAnswer() ? FontWeight.Medium : FontWeight.Normal)
         .fontColor(this.optionTextColor(index))
         .layoutWeight(1)
-        .maxLines(3)
+        .lineHeight(24)
     }
     .width('100%')
-    .height(58)
-    .padding({ left: 14, right: 16 })
+    .constraintSize({ minHeight: 64 })
+    .padding({ left: 14, right: 16, top: 12, bottom: 12 })
     .borderRadius(16)
     .backgroundColor(this.optionBackground(index))
     .border({ width: 1.2, color: this.optionBorderColor(index) })
-    .translate({ x: 0, y: this.pressedChoice === index ? 2 : 0 })
-    .scale({ x: this.pressedChoice === index ? 0.992 : 1, y: this.pressedChoice === index ? 0.992 : 1 })
-    .animation({ duration: 100, curve: Curve.EaseOut })
-    .onTouch((event: TouchEvent) => {
-      if (event.type === TouchType.Down) {
-        this.pressedChoice = index;
-      } else if (event.type === TouchType.Up) {
-        this.pressedChoice = -1;
-      }
-    })
+    .animation(TouchMotion.selection(this.reduceMotion))
+    .enabled(!this.currentSubmitted())
     .onClick(() => {
-      this.pressedChoice = -1;
       this.chooseAnswer(index);
     })
   }
@@ -744,14 +699,14 @@ export struct PracticePage {
           .borderRadius(999)
           .backgroundColor(AppTheme.PRIMARY_LIGHT)
         Blank()
-        Text(this.currentQuestion().source)
+        Text(MobileLayout.studentPhone() ? '' : this.currentQuestion().source)
           .fontSize(10)
           .fontColor(AppTheme.TEXT_TERTIARY)
       }
       .width('100%')
 
       Text(this.currentQuestion().stem)
-        .fontSize(21)
+        .fontSize(MobileLayout.studentPhone() ? 18 : 21)
         .fontWeight(FontWeight.Bold)
         .fontColor(AppTheme.INK)
         .lineHeight(31)
@@ -772,7 +727,12 @@ export struct PracticePage {
       Blank()
 
       Row({ space: 10 }) {
-        Button('‹')
+        Button('‹').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .fontSize(24)
           .fontColor(AppTheme.TEXT_SECONDARY)
           .width(42)
@@ -783,7 +743,12 @@ export struct PracticePage {
           .onClick(() => {
             this.goQuestion(this.currentIndex - 1);
           })
-        Button('›')
+        Button('›').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .fontSize(24)
           .fontColor(AppTheme.TEXT_SECONDARY)
           .width(42)
@@ -795,7 +760,12 @@ export struct PracticePage {
             this.goQuestion(this.currentIndex + 1);
           })
         Blank()
-        Button(this.currentSubmitted() ? '已提交' : '提交答案')
+        Button(this.currentSubmitted() ? '已提交' : '提交答案').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
           .fontSize(AppTheme.FONT_BODY)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
@@ -812,12 +782,11 @@ export struct PracticePage {
       .margin({ top: 18 })
     }
     .width('100%')
-    .layoutWeight(1)
-    .padding({ left: 28, right: 28, top: 24, bottom: 22 })
-    .borderRadius(28)
+    .layoutWeight(0)
+    .padding(MobileLayout.studentPhone() ? 14 : { left: 28, right: 28, top: 24, bottom: 22 })
+    .borderRadius(24)
     .backgroundColor('rgba(255,255,255,0.94)')
-    .border({ width: 1.2, color: 'rgba(255,255,255,0.98)' })
-    .shadow({ radius: 26, color: PRACTICE_SHADOW, offsetX: 0, offsetY: 10 })
+    .border({ width: 1, color: AppTheme.DIVIDER })
   }
 
   @Builder
@@ -834,6 +803,12 @@ export struct PracticePage {
       .backgroundColor(this.currentIndex === index ? AppTheme.INK :
         (this.submittedFlags[index] ? AppTheme.PRIMARY_LIGHT : '#EEF1F5'))
       .border({ width: 1, color: this.currentIndex === index ? AppTheme.INK : AppTheme.DIVIDER })
+      .stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'tab'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'tab')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
       .onClick(() => {
         this.goQuestion(index);
       })
@@ -883,9 +858,9 @@ export struct PracticePage {
         .fontColor(AppTheme.TEXT_TERTIARY)
         .width('100%')
         .margin({ top: 28, bottom: 12 })
-      Row({ space: 8 }) {
+      Flex({ wrap: FlexWrap.Wrap }) {
         ForEach(this.questionIndexes, (bankIndex: number, index: number) => {
-          this.questionNavItem(index)
+          Row() { this.questionNavItem(index) }.margin({ right: 8, bottom: 8 })
         }, (bankIndex: number, index: number) => `${bankIndex}_${index}`)
       }
       .width('100%')
@@ -942,7 +917,7 @@ export struct PracticePage {
       }
       .width('100%')
     }
-    .width(264)
+    .width(this.compact ? '100%' : 224)
     .height('100%')
     .padding({ left: 22, right: 22, top: 26, bottom: 24 })
     .borderRadius(28)
@@ -955,31 +930,63 @@ export struct PracticePage {
     Stack() {
       if (this.compact) {
         Column({ space: 8 }) {
+          if (MobileLayout.studentPhone()) {
+            Row() {
+              Text('AI 刷题').fontSize(22).fontWeight(FontWeight.Bold).layoutWeight(1)
+              Text(`${this.currentIndex + 1} / ${this.questionIndexes.length}`).fontSize(15).fontColor(PRACTICE_BLUE)
+            }.width('100%').height(36)
+            Row({ space: 16 }) {
+              Text(`已答 ${this.answeredTotal}`).fontSize(12).fontColor(PRACTICE_BLUE)
+              Text(`正确 ${this.correctTotal}`).fontSize(12).fontColor('#00795C')
+              Text(`正确率 ${this.answeredTotal === 0 ? 0 : Math.round(this.correctTotal * 100 / this.answeredTotal)}%`)
+                .fontSize(12).fontColor(PRACTICE_VIOLET)
+            }.width('100%').padding({ bottom: 8 })
+            MobileTabs({ labels: ['答题', '出题', '进度与难度'], keys: ['questions', 'generate', 'difficulty'],
+              selected: this.compactTab, onSelect: (key: string) => { this.compactTab = key; } })
+          } else {
           Row({ space: 8 }) {
-            Button('答题').layoutWeight(1).onClick(() => { this.compactTab = 'questions'; })
-            Button('出题').layoutWeight(1).onClick(() => { this.compactTab = 'generate'; })
-            Button('难度').layoutWeight(1).onClick(() => { this.compactTab = 'difficulty'; })
+            Button('答题').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).layoutWeight(1).onClick(() => { this.compactTab = 'questions'; })
+            Button('出题').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).layoutWeight(1).onClick(() => { this.compactTab = 'generate'; })
+            Button('难度').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).layoutWeight(1).onClick(() => { this.compactTab = 'difficulty'; })
           }.width('100%')
+          }
           Row() {
-            if (this.compactTab === 'generate') { this.leftPanel() }
-            else if (this.compactTab === 'difficulty') { this.rightPanel() }
+            MotionPage({ navigationKey: `0|${this.compactTab}`, tabNavigation: true }) {
+            if (this.compactTab === 'generate') {
+              Scroll() { this.leftPanel() }.width('100%').height('100%').align(Alignment.Top)
+            }
+            else if (this.compactTab === 'difficulty') {
+              Scroll() { this.rightPanel() }.width('100%').height('100%').align(Alignment.Top)
+            }
             else { Scroll() { this.questionPanel() }.width('100%').height('100%').align(Alignment.Top) }
+            }
           }.width('100%').layoutWeight(1)
         }.width('100%').height('100%').padding(12)
       } else {
-      this.pageAtmosphere()
       Row({ space: AppTheme.SPACE_L }) {
         this.leftPanel()
 
         Column({ space: AppTheme.SPACE_L }) {
           this.practiceHeader()
-          this.questionPanel()
+          Scroll() { this.questionPanel() }.width('100%').layoutWeight(1).align(Alignment.Top).scrollBar(BarState.Auto)
         }
         .layoutWeight(1)
         .height('100%')
-        .opacity(this.pageReady ? 1 : 0)
-        .translate({ x: 0, y: this.pageReady ? 0 : 16 })
-        .animation({ duration: 320, curve: Curve.EaseOut })
 
         this.rightPanel()
       }
@@ -990,7 +997,7 @@ export struct PracticePage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(PRACTICE_BG)
+    .backgroundColor(AppTheme.BG_PAGE)
     .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 1000 || Number(newArea.height) < 550; })
   }
 }

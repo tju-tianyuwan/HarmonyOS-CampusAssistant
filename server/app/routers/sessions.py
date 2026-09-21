@@ -1,17 +1,18 @@
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from starlette.concurrency import run_in_threadpool
 
 from ..db import get_db, write_lock
-from ..models import ClassCourse, CourseSession, Outline, TranscriptSegment, User
+from ..models import ClassCourse, CourseSession, Note, Outline, SessionResource, TranscriptSegment, User
 from ..services import rag
 from ..services.asr import ASRError, get_asr_provider
 from ..services.asr.local import LocalASRProvider
 from ..services.llm import chat
+from ..services.documents import extract
 from ..services.security import current_user, is_manager, manager, member, same_user
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -64,13 +65,48 @@ def list_sessions(class_course_id: int, user_id: int | None = None, db: Session 
             continue
         kind = "official" if published or (official and manages) else "personal" if personal else "self"
         selected = official if kind == "official" else personal
+        resources = db.exec(select(SessionResource.id).where(SessionResource.session_id == session.id)).all()
+        personal_notes = db.exec(select(Note).where(Note.session_id == session.id,
+                                                    Note.owner_id == user.id)).all()
         result.append({**session.model_dump(), "outline_kind": kind,
-                       "outline_status": selected.status if selected else session.status})
+                       "outline_status": selected.status if selected else session.status,
+                       "resource_count": len(resources),
+                       "personal_notes": [{"id": note.id, "title": note.title, "kind": note.kind}
+                                          for note in personal_notes]})
     return result
+
+
+@router.get("/materials")
+def course_materials(class_course_id: int, response: Response, db: Session = Depends(get_db),
+                     user: User = Depends(current_user)):
+    manager(db, user, class_course_id)
+    if user.role != "teacher":
+        raise HTTPException(403, "仅课程教师可查看教学资料汇总")
+    response.headers["Cache-Control"] = "no-store"
+    result = []
+    outlines = db.exec(select(Outline, CourseSession).join(
+        CourseSession, CourseSession.id == Outline.session_id).where(
+        Outline.class_course_id == class_course_id, CourseSession.class_course_id == class_course_id,
+        Outline.owner_id == -1)).all()
+    for outline, session in outlines:
+        result.append({"id": outline.id, "kind": "outline", "session_id": session.id,
+                       "session_title": session.ai_title or session.title, "title": session.title,
+                       "status": outline.status, "chars": len(outline.markdown),
+                       "updated_at": outline.updated_at})
+    resources = db.exec(select(SessionResource, CourseSession).join(
+        CourseSession, CourseSession.id == SessionResource.session_id).where(
+        SessionResource.class_course_id == class_course_id, CourseSession.class_course_id == class_course_id)).all()
+    for resource, session in resources:
+        result.append({"id": resource.id, "kind": "resource", "session_id": session.id,
+                       "session_title": session.ai_title or session.title, "title": resource.filename,
+                       "status": "uploaded", "chars": len(resource.content), "updated_at": resource.created_at})
+    return sorted(result, key=lambda item: (item["updated_at"], item["id"]), reverse=True)
 
 
 @router.post("")
 def create_session(body: CreateSession, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if user.role != "teacher":
+        raise HTTPException(403, "学生不能创建录音课次")
     same_user(user, body.creator_id)
     member(db, user, body.class_course_id)
     session = CourseSession(**body.model_dump())
@@ -83,6 +119,8 @@ def create_session(body: CreateSession, db: Session = Depends(get_db), user: Use
 @router.post("/{session_id}/chunks/{seq}")
 async def upload_chunk(session_id: int, seq: int = Path(ge=0), file: UploadFile = File(...),
                        db: Session = Depends(get_db), user: User = Depends(current_user)):
+    if user.role != "teacher":
+        raise HTTPException(403, "学生不能上传课堂录音")
     session = session_access(db, user, session_id, edit=True)
     def existing():
         return db.exec(select(TranscriptSegment).where(TranscriptSegment.session_id == session_id,
@@ -182,6 +220,11 @@ async def generate_outline(session_id: int, user_id: int | None = None, db: Sess
             outline = Outline(session_id=session_id, class_course_id=session.class_course_id,
                               owner_id=owner, markdown=markdown)
         outline.markdown, outline.status, outline.updated_at = markdown, "generated", datetime.utcnow()
+        heading = next((line.lstrip("# ").strip() for line in markdown.splitlines()
+                        if line.strip().startswith("#") and line.lstrip("# ").strip()), "")
+        if heading:
+            session.ai_title = heading[:80]
+            db.add(session)
         db.add(outline)
         db.flush()
         rag.delete_document(session.class_course_id, f"outline_{outline.id}", db=db)
@@ -255,6 +298,107 @@ def review_outline(session_id: int, body: PublishBody, db: Session = Depends(get
         db.commit()
         db.refresh(outline)
     return outline
+
+
+@router.get("/{session_id}/resources")
+def list_resources(session_id: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    session_access(db, user, session_id)
+    rows = db.exec(select(SessionResource).where(SessionResource.session_id == session_id)
+                   .order_by(SessionResource.created_at.desc())).all()
+    return [{"id": row.id, "session_id": row.session_id, "filename": row.filename,
+             "chars": len(row.content), "created_at": row.created_at} for row in rows]
+
+
+@router.get("/{session_id}/resources/{resource_id}")
+def resource_detail(session_id: int, resource_id: int, db: Session = Depends(get_db),
+                    user: User = Depends(current_user)):
+    session_access(db, user, session_id)
+    row = db.get(SessionResource, resource_id)
+    if not row or row.session_id != session_id:
+        raise HTTPException(404, "课程资料不存在")
+    return row
+
+
+@router.post("/{session_id}/resources")
+async def upload_resource(session_id: int, file: UploadFile = File(...), db: Session = Depends(get_db),
+                          user: User = Depends(current_user)):
+    session = session_access(db, user, session_id)
+    manager(db, user, session.class_course_id)
+    from pathlib import Path as FilePath
+    from ..config import settings
+    filename = FilePath((file.filename or "").replace("\\", "/")).name[:200]
+    data = await file.read(settings.document_max_bytes + 1)
+    if not data or len(data) > settings.document_max_bytes:
+        raise HTTPException(413, "文件为空或超过上传限制")
+    content = await run_in_threadpool(extract, filename, data)
+    with write_lock:
+        row = SessionResource(session_id=session.id, class_course_id=session.class_course_id,
+                              uploader_id=user.id, filename=filename, content=content)
+        db.add(row)
+        db.flush()
+        rag.add_document(session.class_course_id, f"resource_{row.id}", content,
+                         source=f"课程资料：{filename}", db=db)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+class ResourceUpdate(BaseModel):
+    content: str = Field(min_length=1, max_length=500000)
+
+
+@router.put("/{session_id}/resources/{resource_id}")
+def update_resource(session_id: int, resource_id: int, body: ResourceUpdate,
+                    db: Session = Depends(get_db), user: User = Depends(current_user)):
+    session = session_access(db, user, session_id)
+    manager(db, user, session.class_course_id)
+    if not body.content.strip():
+        raise HTTPException(422, "资料内容不能为空")
+    with write_lock:
+        row = db.get(SessionResource, resource_id)
+        if not row or row.session_id != session_id or row.class_course_id != session.class_course_id:
+            raise HTTPException(404, "课程资料不存在")
+        row.content = body.content
+        rag.add_document(session.class_course_id, f"resource_{row.id}", row.content,
+                         source=f"课程资料：{row.filename}", db=db)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+@router.delete("/{session_id}/resources/{resource_id}")
+def delete_resource(session_id: int, resource_id: int, db: Session = Depends(get_db),
+                    user: User = Depends(current_user)):
+    session = session_access(db, user, session_id)
+    manager(db, user, session.class_course_id)
+    with write_lock:
+        row = db.get(SessionResource, resource_id)
+        if not row or row.session_id != session_id:
+            raise HTTPException(404, "课程资料不存在")
+        rag.delete_document(session.class_course_id, f"resource_{row.id}", db=db)
+        db.delete(row)
+        db.commit()
+    return {"ok": True}
+
+
+@router.get("/outlines")
+def course_outlines(class_course_id: int, db: Session = Depends(get_db),
+                    user: User = Depends(current_user)):
+    manager(db, user, class_course_id)
+    if user.role != "teacher":
+        raise HTTPException(403, "仅课程教师可查看课程提纲")
+    rows = db.exec(select(Outline).where(
+        Outline.class_course_id == class_course_id,
+        Outline.owner_id == -1,
+    ).order_by(Outline.updated_at.desc())).all()
+    result = []
+    for outline in rows:
+        session = db.get(CourseSession, outline.session_id)
+        if session and session.class_course_id == class_course_id:
+            result.append({**outline.model_dump(), "session_title": session.title,
+                           "session_created_at": session.created_at.isoformat()})
+    return result
 
 
 @router.get("/outlines/pending")

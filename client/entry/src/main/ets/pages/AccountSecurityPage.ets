@@ -1,3 +1,4 @@
+import { TouchMotion } from '../common/TouchMotion';
 import { AppTheme } from '../common/AppTheme';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
@@ -12,6 +13,7 @@ interface EmailConfirmation extends EmailRequest { code: string; }
 
 @Component
 export struct AccountSecurityPage {
+  @StorageLink('reduceMotion') reduceMotion: boolean = false;
   recovery: boolean = false;
   onClose: () => void = () => {};
   onPasswordChanged: () => void = () => {};
@@ -102,16 +104,31 @@ export struct AccountSecurityPage {
     Scroll() {
       Column({ space: 16 }) {
         Row() {
-          Button('返回').fontColor(AppTheme.PRIMARY_DEEP).backgroundColor(Color.Transparent)
+          Button('返回').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).fontColor(AppTheme.PRIMARY_DEEP).backgroundColor(Color.Transparent)
             .enabled(!this.busy).onClick(() => { this.onClose(); })
           Text(this.recovery ? '找回密码' : '账号安全').fontSize(22).fontWeight(FontWeight.Bold).layoutWeight(1)
         }.width('100%')
         if (!this.recovery && GlobalState.user?.account_type === 'school') {
           Row({ space: 8 }) {
-            Button('修改密码').layoutWeight(1).backgroundColor(this.binding ? AppTheme.PRIMARY_LIGHT : AppTheme.PRIMARY)
+            Button('修改密码').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).layoutWeight(1).backgroundColor(this.binding ? AppTheme.PRIMARY_LIGHT : AppTheme.PRIMARY)
               .fontColor(this.binding ? AppTheme.PRIMARY_DEEP : '#FFFFFF')
               .onClick(() => { this.binding = false; this.success = false; this.message = ''; })
-            Button('找回邮箱').layoutWeight(1).backgroundColor(this.binding ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
+            Button('找回邮箱').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).layoutWeight(1).backgroundColor(this.binding ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
               .fontColor(this.binding ? '#FFFFFF' : AppTheme.PRIMARY_DEEP)
               .onClick(() => { this.binding = true; this.success = false; this.message = ''; })
           }.enabled(!this.busy)
@@ -144,7 +161,12 @@ export struct AccountSecurityPage {
               TextInput({ placeholder: '邮箱验证码', text: this.code }).layoutWeight(1).maxLength(6).type(InputType.Number)
                 .onFocus(() => { this.focusInput(); })
                 .onChange((v: string) => { this.code = v; })
-              Button(this.cooldown > 0 ? `${this.cooldown} 秒` : '发送验证码').enabled(!this.busy && this.cooldown === 0)
+              Button(this.cooldown > 0 ? `${this.cooldown} 秒` : '发送验证码').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).enabled(!this.busy && this.cooldown === 0)
                 .backgroundColor(AppTheme.PRIMARY_LIGHT).fontColor(AppTheme.PRIMARY_DEEP).onClick(() => { this.sendCode(); })
             }
           }
@@ -156,7 +178,12 @@ export struct AccountSecurityPage {
               .onChange((v: string) => { this.confirmation = v; })
               .onFocus(() => { this.focusInput(); })
           }
-          Button(this.busy ? '正在提交' : this.binding ? '绑定邮箱' : this.recovery ? '重置密码' : '修改密码')
+          Button(this.busy ? '正在提交' : this.binding ? '绑定邮箱' : this.recovery ? '重置密码' : '修改密码').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          })
             .width('100%').backgroundColor(AppTheme.PRIMARY).enabled(!this.busy)
             .onClick(() => { this.submit(); })
         }
@@ -164,7 +191,12 @@ export struct AccountSecurityPage {
           Text(this.message).fontSize(14).fontColor(this.success ? AppTheme.PRIMARY_DEEP : AppTheme.TEXT_SECONDARY).width('100%')
         }
         if (this.success && this.recovery) {
-          Button('返回登录').width('100%').backgroundColor(AppTheme.PRIMARY).onClick(() => { this.onClose(); })
+          Button('返回登录').stateStyles({
+            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+          }).width('100%').backgroundColor(AppTheme.PRIMARY).onClick(() => { this.onClose(); })
         }
       }.width('100%').constraintSize({ maxWidth: 460 }).padding(24)
     }.width('100%').height('100%').align(Alignment.Top).backgroundColor(AppTheme.BG_PAGE)
