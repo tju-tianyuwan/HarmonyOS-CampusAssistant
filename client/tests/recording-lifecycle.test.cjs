@@ -146,3 +146,42 @@ test('local cleanup failure does not undo a successful server save', async () =>
   assert.equal(page.recordState, 'finished');
   assert.equal(page.recordingActive, false);
 });
+
+function quickStartSetup() {
+  const h = setup();
+  h.context.GlobalState.isTeacher = () => true;
+  h.context.GlobalState.course = { id: 1 };
+  h.page.recordState = 'idle'; h.page.recordingActive = false;
+  h.page.startOnAppear = true;
+  h.page.start = async () => h.events.push('start-capture');
+  h.page.onStartRequestConsumed = () => h.events.push('request-consumed');
+  return h;
+}
+
+test('one-tap start is consumed once before capture, even if appearance repeats', () => {
+  const { page, events } = quickStartSetup();
+  page.consumeStartRequest(); page.consumeStartRequest();
+  assert.deepEqual(events, ['request-consumed', 'start-capture']);
+});
+
+test('normal page appearance never starts recording automatically', () => {
+  const { page, events } = quickStartSetup(); page.startOnAppear = false;
+  page.consumeStartRequest(); assert.deepEqual(events, []);
+});
+
+test('recovered recording is never replaced or resumed by a pending quick-start', () => {
+  const { page, events } = quickStartSetup();
+  page.recordState = 'paused'; page.recordingActive = true;
+  page.consumeStartRequest();
+  assert.deepEqual(events, ['request-consumed']); assert.equal(page.recordState, 'paused');
+});
+
+test('invalid course, student identity or unavailable cache cannot auto-start capture', () => {
+  for (const condition of ['course', 'role', 'cache']) {
+    const { page, context, events } = quickStartSetup();
+    if (condition === 'course') context.GlobalState.course = null;
+    if (condition === 'role') context.GlobalState.isTeacher = () => false;
+    if (condition === 'cache') page.recordingStore = null;
+    page.consumeStartRequest(); assert.deepEqual(events, ['request-consumed'], condition);
+  }
+});

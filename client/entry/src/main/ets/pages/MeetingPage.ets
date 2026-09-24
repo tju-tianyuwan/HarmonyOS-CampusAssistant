@@ -267,14 +267,13 @@ export struct MeetingPage {
     Row({ space: 16 }) {
       if (!this.compact || this.room === null) {
       Column({ space: 12 }) {
-        Text(this.roomLabel()).fontSize(GlobalState.isTeacher() ? 22 : 26).fontWeight(FontWeight.Bold)
+        Text(this.roomLabel()).fontSize(26).fontWeight(FontWeight.Bold)
           .fontColor(AppTheme.INK).width('100%')
-        if (!GlobalState.isTeacher()) {
-          Text('和同学交流，让 AI 陪你一起想明白').fontSize(13).fontColor(AppTheme.TEXT_SECONDARY).width('100%')
-        }
+        Text(GlobalState.isTeacher() ? '参与学生讨论，陪伴每一次思考' : '和同学交流，让 AI 陪你一起想明白')
+          .fontSize(13).fontColor(AppTheme.TEXT_SECONDARY).width('100%')
         if (this.error !== '' && this.room === null) { Text(this.error).fontColor(AppTheme.DANGER).fontSize(13).width('100%') }
         Column({ space: 12 }) {
-        if (!GlobalState.isTeacher()) { Text('小组名称').fontSize(13).fontWeight(FontWeight.Medium).fontColor(AppTheme.INK).width('100%') }
+        Text('小组名称').fontSize(13).fontWeight(FontWeight.Medium).fontColor(AppTheme.INK).width('100%')
         TextInput({ placeholder: `新${this.roomLabel()}名称`, text: this.title })
           .height(44).borderRadius(AppTheme.RADIUS_BTN).backgroundColor(AppTheme.BG_SUNKEN)
           .fontColor(AppTheme.TEXT_PRIMARY).placeholderColor(AppTheme.TEXT_TERTIARY)
@@ -323,9 +322,8 @@ export struct MeetingPage {
           .height(44).fontSize(14).borderRadius(AppTheme.RADIUS_BTN)
           .enabled(!this.busy && this.title.trim() !== '' && this.validCapacity())
           .onClick(() => { this.action('create'); })
-        }.width('100%').padding(GlobalState.isTeacher() ? 0 : 16).borderRadius(16)
-          .backgroundColor(GlobalState.isTeacher() ? Color.Transparent : AppTheme.BG_CARD)
-        if (!GlobalState.isTeacher()) {
+        }.width('100%').padding(16).borderRadius(16)
+          .backgroundColor(AppTheme.BG_CARD)
           Row() {
             Text('课程小组').fontSize(16).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK).layoutWeight(1)
             Text(`${this.rooms.length} 个`).fontSize(12).fontColor(AppTheme.TEXT_SECONDARY)
@@ -334,7 +332,6 @@ export struct MeetingPage {
             Text('还没有学习小组，可以创建一个开始讨论。').fontSize(13).lineHeight(21)
               .fontColor(AppTheme.TEXT_SECONDARY).width('100%').padding({ top: 8, bottom: 8 })
           }
-        }
         List({ space: 8 }) {
           ForEach(this.rooms, (room: Room) => {
             ListItem() {
@@ -353,7 +350,7 @@ export struct MeetingPage {
           }).onClick(() => { this.selectRoom(room); })
           }, (room: Room) => `${room.id}`)
         }.layoutWeight(1)
-      }.width(this.compact ? '100%' : GlobalState.isTeacher() ? 240 : 320).height('100%')
+      }.width(this.compact ? '100%' : 320).height('100%')
       }
       if (!this.compact || this.room !== null) {
       Column({ space: 12 }) {
@@ -558,8 +555,8 @@ export struct MeetingPage {
           }
         }
       }.layoutWeight(1).height('100%').padding(this.compact ? 12 : 24).borderRadius(28)
-        .backgroundColor(GlobalState.isTeacher() ? Color.Transparent : '#BFFFFFFF')
-        .border({ width: GlobalState.isTeacher() ? 0 : 1, color: '#F0FFFFFF' })
+        .backgroundColor('#BFFFFFFF')
+        .border({ width: 1, color: '#F0FFFFFF' })
       }
     }.padding(MobileLayout.phone() ? 16 : 24).width('100%').height('100%').backgroundColor(AppTheme.BG_PAGE)
       .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 760; })

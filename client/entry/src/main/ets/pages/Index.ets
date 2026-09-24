@@ -1,6 +1,7 @@
 import { TouchMotion } from '../common/TouchMotion';
 import { MotionPage } from '../common/components/MotionPage';
 import { MobileTabs } from '../common/components/MobileTabs';
+import { FloatingRecordButton } from '../common/components/FloatingRecordButton';
 import { AuthPage } from './AuthPage';
 import { CrystalStudyPage } from './CrystalStudyPage';
 import { StudyBackdrop } from '../common/components/StudyBackdrop';
@@ -74,6 +75,7 @@ struct Index {
   @State materialSessionId: number = -1;
   @State materialPane: string = 'outline';
   @State materialResourceId: number = -1;
+  @State recordStartRequested: boolean = false;
   private stageTimer: number = -1;
 
   aboutToAppear(): void {
@@ -181,7 +183,7 @@ struct Index {
     if (this.restoring) { return '0|restore'; }
     if (this.stage === 'login') { return '0|login'; }
     if (this.stage === 'library') { return '1|library'; }
-    return !GlobalState.isTeacher() && this.currentTab === 'overview' ? '2|home' : '3|workspace';
+    return this.currentTab === 'overview' ? '2|home' : '3|workspace';
   }
 
   private contentMotionKey(): string {
@@ -272,24 +274,30 @@ struct Index {
   }
 
   private shouldShowRecordEntry(): boolean {
-    if (!GlobalState.isTeacher()) {
-      return this.currentTab !== 'course_ai';
-    }
-    return this.currentTab === 'overview' || (this.currentTab === 'class' && this.classSubPage !== 'record');
+    return !GlobalState.isTeacher() && this.currentTab !== 'course_ai';
   }
 
-  private openRecordPage(): void {
+  private hasTeacherRecordEntry(): boolean {
+    return !this.restoring && GlobalState.isTeacher() && this.stage === 'workspace' &&
+      GlobalState.course !== null && !(this.currentTab === 'class' && this.classSubPage === 'record');
+  }
+
+  private openRecordPage(startImmediately: boolean = false): void {
     if (this.recordingActive) { return; }
     if (GlobalState.beforeLeaveClass !== null) {
-      GlobalState.beforeLeaveClass(() => { this.performOpenRecordPage(); });
-    } else { this.performOpenRecordPage(); }
+      GlobalState.beforeLeaveClass(() => { this.performOpenRecordPage(startImmediately); });
+    } else { this.performOpenRecordPage(startImmediately); }
   }
 
-  private performOpenRecordPage(): void {
+  private performOpenRecordPage(startImmediately: boolean = false): void {
     if (!GlobalState.isTeacher()) {
       this.switchToAiPage();
       return;
     }
+    if (GlobalState.course === null || this.recordingActive ||
+      (this.currentTab === 'class' && this.classSubPage === 'record')) { return; }
+    this.crystalDetailOpen = false;
+    this.recordStartRequested = startImmediately;
     this.currentTab = 'class';
     this.classSubPage = 'record';
     GlobalState.updateSnapshot('class');
@@ -470,7 +478,7 @@ struct Index {
           this.backFromWorkspace();
         })
       Blank()
-      if (!GlobalState.isTeacher() && this.compactLayout) {
+      if (this.compactLayout) {
         Text(GlobalState.course?.name ?? '').fontSize(14).fontWeight(FontWeight.Medium)
           .fontColor(AppTheme.TEXT_SECONDARY).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         Blank()
@@ -486,7 +494,7 @@ struct Index {
         .width(44)
         .height(44)
         .borderRadius(22)
-        .backgroundColor(GlobalState.isTeacher() ? AppTheme.INK : AppTheme.PRIMARY)
+        .backgroundColor(AppTheme.PRIMARY)
         .shadow({ radius: 14, color: 'rgba(17,17,17,0.08)', offsetX: 0, offsetY: 4 })
         .onClick(() => {
           this.showSettings = true;
@@ -557,106 +565,16 @@ struct Index {
     MobileTabs({
       labels: GlobalState.isTeacher() ? ['课堂', 'AI数据', 'AI学习小组', '资料'] : ['课程', 'AI学习小组', '刷题', '笔记'],
       keys: GlobalState.isTeacher() ? ['class', 'course_ai', 'ai_meeting', 'materials'] : ['class', 'ai_meeting', 'practice', 'notes'],
-      selected: this.currentTab, interactive: !this.recordingActive, solid: !GlobalState.isTeacher(),
+      selected: this.currentTab, interactive: !this.recordingActive, solid: true,
       disabledKeys: GlobalState.canManageCurrentCourse() ? [] : ['materials'],
       onSelect: (key: string) => { this.navigateWorkbench(key); }
     })
   }
 
   @Builder
-  recordEntryButton() {
-    Stack({ alignContent: Alignment.Center }) {
-      Column()
-        .width(82)
-        .height(82)
-        .borderRadius(41)
-        .linearGradient({
-          angle: 145,
-          colors: [
-            ['#8EF2EF', 0],
-            ['#57C8EE', 0.38],
-            ['#5B8AF7', 0.72],
-            ['#7556E5', 1]
-          ]
-        })
-        .border({ width: 1.5, color: 'rgba(255,255,255,0.92)' })
-        .shadow({
-          radius: 28,
-          color: 'rgba(91,112,232,0.34)',
-          offsetX: 0,
-          offsetY: 13
-        })
-        .clip(true)
-      Column()
-        .width(32)
-        .height(20)
-        .borderRadius(14)
-        .rotate({ angle: -22 })
-        .backgroundColor('rgba(255,255,255,0.24)')
-        .position({ x: 25, y: 18 })
-      Column()
-        .width(13)
-        .height(13)
-        .borderRadius(7)
-        .backgroundColor('rgba(255,255,255,0.20)')
-        .position({ x: 55, y: 25 })
-      if (GlobalState.isTeacher()) {
-      Column({ space: 0 }) {
-        Stack({ alignContent: Alignment.Center }) {
-          Column()
-            .width(24)
-            .height(32)
-            .borderRadius(12)
-            .backgroundColor('#FFFFFF')
-          Column()
-            .width(6)
-            .height(18)
-            .borderRadius(4)
-            .backgroundColor('rgba(117,138,239,0.28)')
-            .margin({ left: 8 })
-        }
-        .width(32)
-        .height(34)
-        Column()
-          .width(5)
-          .height(12)
-          .backgroundColor('#FFFFFF')
-        Column()
-          .width(25)
-          .height(5)
-          .borderRadius(3)
-          .backgroundColor('#FFFFFF')
-      }
-      .width(42)
-      .height(56)
-      .alignItems(HorizontalAlign.Center)
-      .justifyContent(FlexAlign.Center)
-      } else {
-        Text('AI')
-          .fontSize(25)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-      }
-    }
-    .width(92)
-    .height(92)
-    .margin({ right: AppTheme.SPACE_XL, bottom: AppTheme.SPACE_XL })
-    .stateStyles({
-            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
-            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'icon'))
-              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'icon')).animation(TouchMotion.press(this.reduceMotion)) },
-            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          })
-    .zIndex(20)
-    .onClick(() => {
-      this.openRecordPage();
-    })
-  }
-
-  @Builder
   workspaceView() {
     Stack({ alignContent: Alignment.BottomEnd }) {
-      if (!GlobalState.isTeacher()) { StudyBackdrop() }
+      StudyBackdrop()
       Column() {
         if (this.shouldShowWorkbenchSwitcher()) {
           this.workbenchSwitcher()
@@ -673,7 +591,8 @@ struct Index {
             })
           } else if (this.currentTab === 'class') {
             if (this.classSubPage === 'record') {
-              RecordPage()
+              RecordPage({ startOnAppear: this.recordStartRequested,
+                onStartRequestConsumed: () => { this.recordStartRequested = false; } })
             } else {
               ClassPage({ initialSessionId: this.homeSessionId, initialPane: this.homeSessionId > 0 ? 'outline' : 'transcript',
                 onExitDetail: () => { this.switchToOverviewPage(); } })
@@ -790,27 +709,25 @@ struct Index {
           Row() {
             Text(GlobalState.course?.name ?? '').fontSize(12).fontColor(AppTheme.TEXT_SECONDARY)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-            Button(GlobalState.isTeacher() ? '录音' : 'AI').stateStyles({
+            Button('AI').stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
           }).width(64).height(40).fontSize(16).fontWeight(FontWeight.Bold).borderRadius(AppTheme.RADIUS_BTN)
               .padding(0)
-              .fontColor('#FFFFFF').backgroundColor(GlobalState.isTeacher() ? '#00795C' : AppTheme.PRIMARY)
-              .accessibilityText(GlobalState.isTeacher() ? '开始课堂录音' : '课程 AI 助手').onClick(() => { this.openRecordPage(); })
+              .fontColor('#FFFFFF').backgroundColor(AppTheme.PRIMARY)
+              .accessibilityText('课程 AI 助手').onClick(() => { this.openRecordPage(); })
           }.width('100%').height(52).padding({ left: 16, right: 12 }).backgroundColor('#FFFFFF')
         }
       }
       .width('100%')
       .height('100%')
+      .padding({ bottom: this.hasTeacherRecordEntry() ? 80 : 0 })
 
       this.workspaceTopControls()
 
       if (this.shouldShowRecordEntry() && !this.compactLayout) {
-        if (GlobalState.isTeacher()) {
-          this.recordEntryButton()
-        } else {
           Button('AI 助手').stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
@@ -819,9 +736,9 @@ struct Index {
           }).fontSize(16).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
             .height(48).padding({ left: 22, right: 22 }).borderRadius(16)
             .backgroundColor(AppTheme.PRIMARY).margin({ right: 24, bottom: 24 })
-            .shadow({ radius: 12, color: 'rgba(23,107,85,0.16)', offsetY: 4 })
-            .accessibilityText('课程 AI 助手').onClick(() => { this.openRecordPage(); })
-        }
+            .shadow({ radius: 12, color: 'rgba(21,90,165,0.16)', offsetY: 4 })
+            .accessibilityText('课程 AI 助手')
+            .onClick(() => { this.openRecordPage(); })
       }
     }
     .width('100%')
@@ -830,7 +747,7 @@ struct Index {
   }
 
   build() {
-    Stack() {
+    Stack({ alignContent: Alignment.BottomEnd }) {
       MotionPage({ navigationKey: this.rootMotionKey() }) {
       if (this.restoring) {
         LoadingProgress().width(40).height(40)
@@ -842,7 +759,7 @@ struct Index {
         .height('100%')
       } else if (this.stage === 'library') {
         Stack() {
-          if (!GlobalState.isTeacher()) { StudyBackdrop() }
+          StudyBackdrop()
           LibraryPage({
             onEnterCourse: () => {
               this.crystalDetailOpen = false;
@@ -869,8 +786,9 @@ struct Index {
         .width('100%')
         .height('100%')
       } else {
-        if (!GlobalState.isTeacher() && this.currentTab === 'overview') {
+        if (this.currentTab === 'overview') {
           CrystalStudyPage({ detailOpen: $crystalDetailOpen,
+            onRecord: () => { this.openRecordPage(); },
             onClose: () => { this.returnToLibrary(); },
             onSettings: () => { this.showSettings = true; },
             onNavigate: (key: string) => {
@@ -883,6 +801,10 @@ struct Index {
             } })
         } else { this.workspaceView() }
       }
+      }
+      if (this.hasTeacherRecordEntry() && !this.showSettings && !this.crystalDetailOpen && !this.recordingActive) {
+        FloatingRecordButton({ onRecord: () => { this.openRecordPage(true); } })
+          .margin({ right: 18, bottom: 16 })
       }
       if (this.showSettings) {
         SettingsPage({

@@ -1,17 +1,17 @@
 import { TouchMotion } from '../common/TouchMotion';
-import { deviceInfo } from '@kit.BasicServicesKit';
+import { StudyMaterial } from '../common/StudyMaterial';
+import { CrystalIcon } from '../common/components/CrystalIcon';
 import { StudyBackdrop } from '../common/components/StudyBackdrop';
-import { uiEffect } from '@kit.ArkGraphics2D';
-import { hdsEffect } from '@kit.UIDesignKit';
 import { GlobalState } from '../service/GlobalState';
 import { Api } from '../service/Api';
 import { CourseSession, CourseWorkspaceStats } from '../model/Models';
+import { pasteboard } from '@kit.BasicServicesKit';
 
 const INK: string = '#173A56';
 const MUTED: string = '#526D83';
 const BLUE: string = '#155AA5';
 
-/** Student course home. HDS light effects are API 20+, blur is ArkUI material.
+/** Shared course home. HDS light effects are API 20+, blur is ArkUI material.
  * This does not label ordinary blur as HDS IMMERSIVE (API 23) material.
  * No writes: cards navigate to existing features; course information comes from the active course.
  */
@@ -22,6 +22,7 @@ export struct CrystalStudyPage {
   onSettings: () => void = () => {};
   onNavigate: (key: string) => void = () => {};
   onOpenLesson: (id: number) => void = () => {};
+  onRecord: () => void = () => {};
   @State compact: boolean = true;
   @State canvasWidth: number = 400;
   @State canvasHeight: number = 800;
@@ -32,9 +33,12 @@ export struct CrystalStudyPage {
   @State lessons: CourseSession[] = [];
   @State lessonsReady: boolean = false;
   @State lessonsError: boolean = false;
+  @State pendingLessons: number = 0;
+  @State lessonTotal: number = 0;
+  @State resourceTotal: number = 0;
   private alive: boolean = false;
 
-  aboutToAppear(): void { this.alive = true; this.loadStats(); this.loadLessons(); }
+  aboutToAppear(): void { this.alive = true; if (!GlobalState.isTeacher()) { this.loadStats(); } this.loadLessons(); }
   aboutToDisappear(): void { this.alive = false; }
 
   private async loadStats(): Promise<void> {
@@ -51,7 +55,12 @@ export struct CrystalStudyPage {
     try {
       const all = JSON.parse(await Api.get(`/sessions?class_course_id=${GlobalState.courseId()}&user_id=${GlobalState.userId()}`)) as CourseSession[];
       if (!this.alive) { return; }
-      this.lessons = all.filter((item: CourseSession) => item.outline_kind === 'official' && item.outline_status === 'published')
+      this.lessonTotal = all.length;
+      this.pendingLessons = all.filter((item: CourseSession) => item.outline_kind === 'official' &&
+        ['draft', 'generated', 'pending'].includes(item.outline_status ?? '')).length;
+      this.resourceTotal = all.reduce((sum: number, item: CourseSession) => sum + (item.resource_count ?? 0), 0);
+      this.lessons = all.filter((item: CourseSession) => (GlobalState.isTeacher() && GlobalState.canManageCurrentCourse()) ||
+        (item.outline_kind === 'official' && item.outline_status === 'published'))
         .sort((a: CourseSession, b: CourseSession) => b.created_at.localeCompare(a.created_at) || b.id - a.id).slice(0, 3);
     } catch (e) { if (this.alive) { this.lessonsError = true; } }
     finally { if (this.alive) { this.lessonsReady = true; } }
@@ -61,19 +70,23 @@ export struct CrystalStudyPage {
     return Math.max(290, Math.min(370, (this.canvasHeight - 350) * 0.58));
   }
 
+  private async copyInvite(): Promise<void> {
+    const code: string = GlobalState.course?.invite_code ?? '';
+    if (!code) { return; }
+    try {
+      await pasteboard.getSystemPasteboard().setData(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, code));
+      this.getUIContext().getPromptAction().showToast({ message: '邀请码已复制' });
+    } catch (e) {
+      this.getUIContext().getPromptAction().showToast({ message: '复制失败，请长按邀请码复制' });
+    }
+  }
+
   private tabletEntryHeight(): number {
     return (this.tabletHeroHeight() + 76) / 2;
   }
 
   private light(source: boolean = false): VisualEffect {
-    if (deviceInfo.sdkApiVersion >= 20 && canIUse('SystemCapability.UIDesign.HDSComponent.Core') && !this.subtle) {
-      return new hdsEffect.HdsEffectBuilder()
-        .pressShadow(hdsEffect.PressShadowType.BLEND_WHITE)
-        .pointLight({ sourceType: source ? hdsEffect.PointLightSourceType.SOFT : hdsEffect.PointLightSourceType.NONE,
-          illuminatedType: hdsEffect.PointLightIlluminatedType.BORDER,
-          options: { color: '#A8EBFF', intensity: 0.35, height: 24, bloom: 0.1 } }).buildEffect();
-    }
-    return uiEffect.createEffect();
+    return StudyMaterial.light(this.subtle, source);
   }
 
 
@@ -84,14 +97,7 @@ export struct CrystalStudyPage {
 
   @Builder
   crystalIcon(icon: Resource, size: number, tint: string = BLUE) {
-    Stack({ alignContent: Alignment.Center }) {
-      Column().width(size - 6).height(size - 6).borderRadius(size * 0.27)
-        .backgroundColor('#92B8D5').translate({ y: 5 }).opacity(0.45)
-      Column().width(size).height(size).borderRadius(size * 0.27)
-        .linearGradient({ angle: 135, colors: [['#FFFFFF', 0], ['#E5F3FD', 0.48], ['#B5D5EC', 1]] })
-        .border({ width: 1, color: '#F8FCFF' }).shadow({ radius: 16, color: '#204275A0', offsetY: 8 })
-      SymbolGlyph(icon).fontSize(size * 0.43).fontColor([tint])
-    }.width(size + 8).height(size + 10).visualEffect(this.light())
+    CrystalIcon({ icon: icon, edge: size, tint: tint })
   }
 
   @Builder
@@ -108,7 +114,7 @@ export struct CrystalStudyPage {
         .accessibilityText('返回全部课程').onClick(this.onClose)
       Column({ space: 2 }) {
         Text('智慧伴学').fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK)
-        Text('我的课程 · 学习空间').fontSize(11).fontColor(MUTED)
+        Text(GlobalState.isTeacher() ? '我的课程 · 教学空间' : '我的课程 · 学习空间').fontSize(11).fontColor(MUTED)
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       Button(this.subtle ? '柔和' : '通透').stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
@@ -138,7 +144,7 @@ export struct CrystalStudyPage {
     Column({ space: 18 }) {
       Row({ space: 14 }) {
         Column({ space: 8 }) {
-          Text('我的学习空间').fontSize(12).fontColor(MUTED)
+          Text(GlobalState.isTeacher() ? '我的教学空间' : '我的学习空间').fontSize(12).fontColor(MUTED)
           Text(GlobalState.course?.name ?? '课程').fontSize(this.compact ? 29 : 38)
             .fontWeight(FontWeight.Bold).fontColor(INK).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(`${GlobalState.course?.class_name ?? ''} · ${GlobalState.course?.teacher_name ?? ''}`)
@@ -159,13 +165,20 @@ export struct CrystalStudyPage {
           .border({ width: 1, color: '#8BB9DA' }).shadow({ radius: 12, color: '#30406C9A', offsetY: 5 })
           .visualEffect(this.light(true))
           .onClick(() => { this.detailOpen = true; })
-        Text('课堂、思考与成长，在这里连接').fontSize(12).fontColor(MUTED).layoutWeight(1).maxLines(2)
+        Text(GlobalState.isTeacher() ? '记录课堂，了解学情，让教学更有回应' : '课堂、思考与成长，在这里连接')
+          .fontSize(12).fontColor(MUTED).layoutWeight(1).maxLines(2)
       }.width('100%')
-      if (this.stats !== null) {
+      if (GlobalState.isTeacher()) {
+        Row() {
+          this.metric(this.lessonsReady && !this.lessonsError ? `${this.lessonTotal}` : '—', '课堂记录')
+          this.metric(this.lessonsReady && !this.lessonsError ? `${this.pendingLessons}` : '—', '待审核提纲')
+          this.metric(this.lessonsReady && !this.lessonsError ? `${this.resourceTotal}` : '—', '课程资料')
+        }.width('100%').padding({ top: 16 }).border({ width: { top: 1 }, color: '#94FFFFFF' })
+      } else if (this.stats !== null) {
         Row() {
           this.metric(`${this.stats.official_lesson_count}`, '课堂记录')
-          this.metric(`${this.stats.class_note_count}`, '班级笔记')
-          this.metric(`${this.stats.personal_note_count}`, '个人笔记')
+            this.metric(`${this.stats.class_note_count}`, '班级笔记')
+            this.metric(`${this.stats.personal_note_count}`, '个人笔记')
         }.width('100%').padding({ top: 16 }).border({ width: { top: 1 }, color: '#94FFFFFF' })
       } else {
         Row() {
@@ -218,6 +231,7 @@ export struct CrystalStudyPage {
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'card')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
           })
+      .enabled(key !== 'materials' || GlobalState.canManageCurrentCourse())
       .onClick(() => { this.onNavigate(key); }).accessibilityText(`打开${title}`)
   }
 
@@ -231,7 +245,8 @@ export struct CrystalStudyPage {
       }.width('100%')
       Text(item.ai_title || item.title).fontSize(19).fontWeight(FontWeight.Bold).fontColor(INK)
         .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).width('100%')
-      Text('查看已发布的课程提纲').fontSize(12).fontColor(MUTED).width('100%')
+      Text(GlobalState.isTeacher() ? (item.outline_status === 'published' ? '已发布 · 查看课堂与资料' : '查看转写、整理提纲与资料') :
+        '查看已发布的课程提纲').fontSize(12).fontColor(MUTED).width('100%')
     }.width('100%').constraintSize({ minHeight: 146 }).padding(22).borderRadius(24)
       .justifyContent(FlexAlign.SpaceBetween).backgroundColor(this.subtle ? '#EFF5FA' : '#ADFFFFFF')
       .border({ width: 1, color: '#EAFFFFFF' }).visualEffect(this.light())
@@ -251,7 +266,7 @@ export struct CrystalStudyPage {
       Row() {
         Column({ space: 4 }) {
           Text('近期课堂').fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
-          Text('从最近一堂课，继续理解与积累').fontSize(12).fontColor(MUTED)
+          Text(GlobalState.isTeacher() ? '回到最近的课堂，继续整理与发布' : '从最近一堂课，继续理解与积累').fontSize(12).fontColor(MUTED)
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
         Button('全部课堂  ›').stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
@@ -267,7 +282,8 @@ export struct CrystalStudyPage {
           Column({ space: 8 }) {
             Text(!this.lessonsReady ? '正在整理近期课堂' : this.lessonsError ? '近期课堂暂未加载' : '等待下一次课堂相遇')
               .fontSize(18).fontWeight(FontWeight.Medium).fontColor(INK)
-            Text(this.lessonsError ? '可以重试，或从“全部课堂”查看课程内容。' : '老师发布课程提纲后，会在这里显示。')
+            Text(this.lessonsError ? '可以重试，或从“全部课堂”查看课程内容。' :
+              GlobalState.isTeacher() ? '开始课堂录音后，可在这里继续整理提纲与资料。' : '老师发布课程提纲后，会在这里显示。')
               .fontSize(13).fontColor(MUTED)
           }.layoutWeight(1).alignItems(HorizontalAlign.Start)
           if (this.lessonsError) {
@@ -281,6 +297,10 @@ export struct CrystalStudyPage {
           }
         }.width('100%').padding(24).constraintSize({ minHeight: 146 })
           .backgroundColor('#90FFFFFF').borderRadius(24).border({ width: 1, color: '#EFFFFFFF' })
+      } else if (this.compact) {
+        Column({ space: 12 }) {
+          ForEach(this.lessons, (item: CourseSession) => { this.recentLesson(item) }, (item: CourseSession) => `${item.id}`)
+        }.width('100%')
       } else {
         Row({ space: 16 }) {
           ForEach(this.lessons, (item: CourseSession) => {
@@ -295,17 +315,24 @@ export struct CrystalStudyPage {
   entries() {
     Column({ space: 12 }) {
       Row() {
-        Text('开始学习').fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
+        Text(GlobalState.isTeacher() ? '教学工作台' : '开始学习').fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
         Blank()
-        Text('从课堂到掌握').fontSize(12).fontColor(MUTED)
+        Text(GlobalState.isTeacher() ? '围绕每一堂课' : '从课堂到掌握').fontSize(12).fontColor(MUTED)
       }.width('100%').padding({ bottom: 2 })
       Row({ space: 12 }) {
-        Column() { this.entry('class', '课程', '课次提纲与学习资料', $r('sys.symbol.folder')) }.layoutWeight(1)
-        Column() { this.entry('ai_meeting', 'AI学习小组', '与同学和 AI 一起讨论', $r('sys.symbol.person_2')) }.layoutWeight(1)
+        Column() { this.entry('class', GlobalState.isTeacher() ? '课堂' : '课程',
+          GlobalState.isTeacher() ? '回看转写、编辑与发布提纲' : '课次提纲与学习资料', $r('sys.symbol.folder')) }.layoutWeight(1)
+        Column() { this.entry('ai_meeting', 'AI学习小组',
+          GlobalState.isTeacher() ? '参与讨论，了解学生的思考' : '与同学和 AI 一起讨论', $r('sys.symbol.person_2')) }.layoutWeight(1)
       }.width('100%')
       Row({ space: 12 }) {
-        Column() { this.entry('practice', '巩固练习', '围绕课程重点练习', $r('sys.symbol.checkmark')) }.layoutWeight(1)
-        Column() { this.entry('notes', '学习笔记', '整理每一次新的理解', $r('sys.symbol.doc_text')) }.layoutWeight(1)
+        if (GlobalState.isTeacher()) {
+          Column() { this.entry('course_ai', 'AI 数据', '查看学习热区与课堂反馈', $r('sys.symbol.lightbulb')) }.layoutWeight(1)
+          Column() { this.entry('materials', '教学资料', '管理课程提纲与上传资料', $r('sys.symbol.doc_text')) }.layoutWeight(1)
+        } else {
+          Column() { this.entry('practice', '巩固练习', '围绕课程重点练习', $r('sys.symbol.checkmark')) }.layoutWeight(1)
+          Column() { this.entry('notes', '学习笔记', '整理每一次新的理解', $r('sys.symbol.doc_text')) }.layoutWeight(1)
+        }
       }.width('100%')
     }.width('100%')
   }
@@ -313,10 +340,11 @@ export struct CrystalStudyPage {
   @Builder
   aiCard() {
     Row({ space: 16 }) {
-      this.crystalIcon($r('sys.symbol.lightbulb'), 50, '#187E85')
+      this.crystalIcon(GlobalState.isTeacher() ? $r('sys.symbol.mic') : $r('sys.symbol.lightbulb'), 50, '#187E85')
       Column({ space: 6 }) {
-        Text('让问题，有回响').fontSize(19).fontWeight(FontWeight.Bold).fontColor(INK)
-        Text('结合课程资料，和 AI 一起理清思路').fontSize(12).fontColor(MUTED).maxLines(2)
+        Text(GlobalState.isTeacher() ? '记录这一堂课' : '让问题，有回响').fontSize(19).fontWeight(FontWeight.Bold).fontColor(INK)
+        Text(GlobalState.isTeacher() ? '进入录音，转写课堂内容并生成提纲' : '结合课程资料，和 AI 一起理清思路')
+          .fontSize(12).fontColor(MUTED).maxLines(2)
       }.layoutWeight(1).alignItems(HorizontalAlign.Start)
       SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(16).fontColor([BLUE])
     }.width('100%').padding(20).borderRadius(24)
@@ -326,26 +354,29 @@ export struct CrystalStudyPage {
         normal: { .translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
         pressed: { .translate(TouchMotion.pressedOffset(this.reduceMotion, 'card')).animation(TouchMotion.press(this.reduceMotion)) }
       })
-      .onClick(() => { this.onNavigate('course_ai'); })
+      .onClick(() => { if (GlobalState.isTeacher()) { this.onRecord(); } else { this.onNavigate('course_ai'); } })
   }
 
   @Builder
   dock() {
     Row({ space: 8 }) {
       Row({ space: 4 }) {
-        ForEach(['课程', '小组', '练习', '笔记'], (label: string, index: number) => {
+        ForEach(GlobalState.isTeacher() ? ['课堂', '学情', '小组', '资料'] : ['课程', '小组', '练习', '笔记'], (label: string, index: number) => {
           Button(label).stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).layoutWeight(1).height(42).fontSize(13).fontColor(index === 0 ? BLUE : MUTED)
+          }).layoutWeight(1).height(42).fontSize(13).padding({ left: 4, right: 4 }).fontColor(index === 0 ? BLUE : MUTED)
             .backgroundColor(index === 0 ? '#CBFFFFFF' : Color.Transparent).borderRadius(18)
-            .onClick(() => { this.onNavigate(['class', 'ai_meeting', 'practice', 'notes'][index]); })
+            .enabled(!GlobalState.isTeacher() || index !== 3 || GlobalState.canManageCurrentCourse())
+            .onClick(() => { this.onNavigate((GlobalState.isTeacher() ? ['class', 'course_ai', 'ai_meeting', 'materials'] :
+              ['class', 'ai_meeting', 'practice', 'notes'])[index]); })
         })
       }.layoutWeight(1).padding(6).borderRadius(24).backgroundColor(this.subtle ? '#F2F6FC' : '#80FFFFFF')
         .backgroundBlurStyle(this.subtle ? BlurStyle.NONE : BlurStyle.Thin)
         .border({ width: 1, color: '#EFFFFFFF' }).shadow({ radius: 18, color: '#1D32669D', offsetY: 6 })
+      if (!GlobalState.isTeacher()) {
       Button('AI').stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
@@ -355,8 +386,11 @@ export struct CrystalStudyPage {
         .backgroundColor('#124B87')
         .linearGradient({ angle: 150, colors: [['#5B9CC9', 0], ['#2362A0', 0.55], ['#1A437C', 1]] })
         .border({ width: 1.2, color: '#CCE9FA' }).shadow({ radius: 14, color: '#405780A9', offsetY: 6 })
-        .visualEffect(this.light(true)).accessibilityText('打开课程 AI 助手').onClick(() => { this.onNavigate('course_ai'); })
-    }.width('100%').constraintSize({ maxWidth: 560 }).padding({ left: 18, right: 18, top: 10, bottom: 16 })
+        .visualEffect(this.light(true)).accessibilityText('打开课程 AI 助手')
+        .onClick(() => { this.onNavigate('course_ai'); })
+      }
+    }.width('100%').constraintSize({ maxWidth: 560 }).padding({ left: 18,
+      right: GlobalState.isTeacher() && this.compact ? 132 : 18, top: 10, bottom: 16 })
   }
 
   @Builder
@@ -383,7 +417,16 @@ export struct CrystalStudyPage {
           Text(`授课教师    ${GlobalState.course?.teacher_name ?? '待补充'}`).fontSize(15).fontColor(INK).width('100%')
           Text(`所属班级    ${GlobalState.course?.class_name ?? '待补充'}`).fontSize(15).fontColor(INK).width('100%')
           Text(`课程邀请码    ${GlobalState.course?.invite_code ?? ''}`).fontSize(15).fontColor(INK).width('100%')
+            .copyOption(CopyOptions.InApp)
         }.width('100%').padding(20).borderRadius(18).backgroundColor('#BFFFFFFF')
+        if (GlobalState.isTeacher() && (GlobalState.course?.invite_code ?? '') !== '') {
+          Button('复制邀请码').width('100%').height(44).fontSize(14).fontColor(BLUE)
+            .backgroundColor('#BFFFFFFF').borderRadius(16)
+            .stateStyles({
+              normal: { .scale({ x: 1, y: 1 }).animation(TouchMotion.release(this.reduceMotion)) },
+              pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) }
+            }).onClick(() => { this.copyInvite(); })
+        }
         Button('进入课堂').stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
@@ -411,6 +454,7 @@ export struct CrystalStudyPage {
               this.courseHero()
               this.entries()
               this.aiCard()
+              if (GlobalState.isTeacher()) { this.recentLessons() }
             } else {
               Row({ space: 24 }) {
                 Column({ space: 24 }) { this.courseHero(); this.aiCard() }.layoutWeight(1.1)

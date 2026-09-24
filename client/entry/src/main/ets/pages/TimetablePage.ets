@@ -3,6 +3,8 @@ import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { ClassCourse } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
+import { TimetableStyle } from '../common/TimetableStyle';
+import { TimetableCourseCard } from '../common/components/TimetableCourseCard';
 
 interface ScheduleEntry {
   semester_start: string;
@@ -28,9 +30,6 @@ interface ScheduleBlock { start: number; end: number; entries: ScheduleEntry[]; 
 
 const DAYS: string[] = ['一', '二', '三', '四', '五', '六', '日'];
 const SECTIONS: number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-const TINTS: string[] = ['#E0F6F0', '#E8EFFF', '#FFF0DB', '#FCE7EA', '#E3F3F7'];
-const INKS: string[] = ['#00795C', '#305FC3', '#935B12', '#B54159', '#16708A'];
-const SLOT_HEIGHT: number = 58;
 
 @Component
 export struct TimetablePage {
@@ -57,6 +56,8 @@ export struct TimetablePage {
     this.weekMonday = this.monday(new Date()).getTime();
     this.load();
   }
+
+  aboutToDisappear(): void { this.requestVersion++; }
 
   private refreshSchedule(): void { this.load(); }
 
@@ -171,8 +172,8 @@ export struct TimetablePage {
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).width(44).height(44).borderRadius(12).backgroundColor(AppTheme.BG_CARD)
-      .border({ width: 1, color: AppTheme.DIVIDER })
+          }).width(44).height(44).borderRadius(16).backgroundColor('#45C6DDF1')
+      .border({ width: 1, color: '#70FFFFFF' })
       .accessibilityText(label).onClick(action)
   }
 
@@ -201,11 +202,9 @@ export struct TimetablePage {
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).height(40).fontSize(12).fontColor(AppTheme.PRIMARY).backgroundColor(AppTheme.PRIMARY_LIGHT).borderRadius(12)
+          }).height(40).fontSize(12).fontColor('#FFFFFF').backgroundColor(AppTheme.PRIMARY).borderRadius(16)
           .onClick(() => { this.weekMonday = this.monday(new Date()).getTime(); })
-      }.width('100%').padding(12).borderRadius(22).backgroundColor(AppTheme.BG_CARD)
-        .border({ width: 1, color: '#EDFFFFFF' })
-        .border({ width: 1, color: AppTheme.DIVIDER })
+      }.width('100%').padding({ top: 6, bottom: 6 })
       Row() {
         Text(`${this.weekEntries().length} 次课`).fontSize(12).fontColor(AppTheme.TEXT_SECONDARY)
         Blank()
@@ -218,59 +217,45 @@ export struct TimetablePage {
   @Builder
   weekGrid() {
     Column() {
-      Row({ space: 2 }) {
-        Text('节').fontSize(10).fontColor('#74817D').width(24).textAlign(TextAlign.Center)
+      Row({ space: 4 }) {
+        Text('节次').fontSize(9).fontColor(AppTheme.TEXT_SECONDARY).width(22).textAlign(TextAlign.Center)
         ForEach(DAYS, (day: string, index: number) => {
           Column({ space: 4 }) {
             Text(day).fontSize(11).fontColor(this.isToday(index) ? '#FFFFFF' : AppTheme.TEXT_SECONDARY)
             Text(`${this.dayDate(index).getDate()}`).fontSize(15).fontWeight(FontWeight.Bold)
               .fontColor(this.isToday(index) ? '#FFFFFF' : AppTheme.INK)
-          }.layoutWeight(1).height(50).justifyContent(FlexAlign.Center).borderRadius(8)
-            .backgroundColor(this.isToday(index) ? AppTheme.PRIMARY : AppTheme.BG_CARD)
-            .foregroundColor(this.isToday(index) ? '#FFFFFF' : '#4A5C55')
+          }.layoutWeight(1).height(50).justifyContent(FlexAlign.Center).borderRadius(16)
+            .backgroundColor(this.isToday(index) ? AppTheme.PRIMARY : Color.Transparent)
+            .shadow({ radius: this.isToday(index) ? 8 : 0, color: '#20155AA5', offsetY: 3 })
+            .accessibilityText(`周${day}，${this.dayDate(index).getMonth() + 1}月${this.dayDate(index).getDate()}日${this.isToday(index) ? '，今天' : ''}`)
         })
-      }.width('100%').margin({ bottom: 8 })
-      Row({ space: 2 }) {
-        Column() {
+      }.width('100%').margin({ bottom: 14 })
+      Row({ space: 4 }) {
+        Stack({ alignContent: Alignment.TopStart }) {
           ForEach(SECTIONS, (section: number) => {
             Column({ space: 2 }) {
-              Text(`${section}`).fontSize(12).fontWeight(FontWeight.Medium).fontColor('#5E7067')
+              Text(`${section}`).fontSize(11).fontWeight(FontWeight.Medium).fontColor(AppTheme.TEXT_SECONDARY)
               if (section === 1 || section === 5 || section === 9) {
-                Text(section === 1 ? '上午' : section === 5 ? '下午' : '晚间').fontSize(8).fontColor('#82928B')
+                Text(section === 1 ? '上午' : section === 5 ? '下午' : '晚间').fontSize(8).fontColor(AppTheme.TEXT_TERTIARY)
               }
-            }.height(SLOT_HEIGHT).width(24).padding({ top: 8 })
+            }.height(TimetableStyle.SLOT_HEIGHT).width(22).padding({ top: 8 })
+              .position({ x: 0, y: TimetableStyle.sectionTop(section) })
           })
-        }.width(24)
+        }.width(22).height(TimetableStyle.totalHeight())
         ForEach(DAYS, (day: string, index: number) => {
           Stack({ alignContent: Alignment.TopStart }) {
-            Column() {
-              ForEach(SECTIONS, (section: number) => {
-                Column().height(SLOT_HEIGHT).width('100%')
-                  .border({ width: { bottom: 1 }, color: '#E8EFEB' })
-                  .backgroundColor(this.isToday(index) ? '#DCEBF8' : '#BFFFFFFF')
-              })
-            }.width('100%')
             ForEach(this.dayBlocks(index + 1), (block: ScheduleBlock) => {
-              Column({ space: 4 }) {
-                Text(block.entries.length > 1 ? `${block.entries.length} 个时段冲突` :
-                  this.courseFor(block.entries[0].class_course_id)?.name ?? '')
-                  .fontSize(11).fontWeight(FontWeight.Medium).maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .fontColor(block.entries.length > 1 ? '#B54159' : INKS[block.entries[0].class_course_id % INKS.length])
-                if (block.end > block.start) {
-                  Text(block.entries.length > 1 ? block.entries.map((entry: ScheduleEntry) =>
-                    this.courseFor(entry.class_course_id)?.name ?? '').join('、') : block.entries[0].location || '教室待定')
-                    .fontSize(9).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text(`${block.start}–${block.end}节`).fontSize(9)
-                }
-              }.width('100%').height((block.end - block.start + 1) * SLOT_HEIGHT - 4)
-                .padding({ left: 3, right: 3, top: 7, bottom: 4 }).alignItems(HorizontalAlign.Start).borderRadius(6)
-                .backgroundColor(block.entries.length > 1 ? '#FCE7EA' : TINTS[block.entries[0].class_course_id % TINTS.length])
-                .position({ x: 0, y: (block.start - 1) * SLOT_HEIGHT }).clip(true)
-                .accessibilityText(block.entries.map((entry: ScheduleEntry) =>
-                  `${this.courseFor(entry.class_course_id)?.name} 周${day} 第${entry.start_section}到${entry.end_section}节`).join('、'))
-                .onClick(() => { this.openBlock(block); })
+              TimetableCourseCard({ courseId: block.entries[0].class_course_id,
+                courseTitle: this.courseFor(block.entries[0].class_course_id)?.name ?? '',
+                locationText: block.entries[0].location, startSection: block.start, endSection: block.end,
+                conflictCount: block.entries.length, blockId: block.entries.map((entry: ScheduleEntry) => `${entry.id}`).join('-'),
+                description: (block.entries.length > 1 ? '上课时间冲突，' : '') + block.entries.map((entry: ScheduleEntry) =>
+                  `${this.courseFor(entry.class_course_id)?.name} 周${day} 第${entry.start_section}到${entry.end_section}节，${entry.location || '教室待定'}`).join('；'),
+                onOpen: () => { this.openBlock(block); } })
+                .position({ x: 0, y: TimetableStyle.sectionTop(block.start) })
             }, (block: ScheduleBlock) => JSON.stringify(block))
-          }.layoutWeight(1).height(SLOT_HEIGHT * 12)
+          }.layoutWeight(1).height(TimetableStyle.totalHeight())
+            .border({ width: { left: index === 0 ? 0 : 1 }, color: TimetableStyle.DAY_DIVIDER })
         })
       }.width('100%').alignItems(VerticalAlign.Top)
     }.width('100%')
@@ -282,14 +267,14 @@ export struct TimetablePage {
       Row({ space: 12 }) {
         Text(course.name.substring(0, 1)).fontSize(16).fontWeight(FontWeight.Bold)
           .width(38).height(38).textAlign(TextAlign.Center).borderRadius(8)
-          .backgroundColor(TINTS[course.id % TINTS.length]).fontColor(INKS[course.id % INKS.length])
+          .backgroundColor(TimetableStyle.tone(course.id).top).fontColor(TimetableStyle.tone(course.id).ink)
         Column({ space: 4 }) {
           Text(course.name).fontSize(15).fontWeight(FontWeight.Medium).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(`${course.class_name} · ${course.teacher_name ?? ''}`).fontSize(11).fontColor(AppTheme.TEXT_SECONDARY).maxLines(1)
         }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-        SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor(['#78877F'])
+        SymbolGlyph($r('sys.symbol.chevron_right')).fontSize(14).fontColor([AppTheme.TEXT_SECONDARY])
       }.width('100%').padding({ top: 12, bottom: 12 })
-        .border({ width: { bottom: 1 }, color: '#E6EDE9' })
+        .border({ width: { bottom: 1 }, color: '#6896B4CF' })
         .onClick(() => { this.selectedCourse = course; this.selectedEntry = null; })
     }, (course: ClassCourse) => `${course.id}`)
   }
@@ -329,7 +314,8 @@ export struct TimetablePage {
           }).width('100%').height(48).borderRadius(12).backgroundColor(AppTheme.PRIMARY).fontColor('#FFFFFF')
         .onClick(() => { if (this.selectedCourse !== null) { this.onEnterCourse(this.selectedCourse); } })
 
-    }.width('100%').padding(20).backgroundColor('#FFFFFF').borderRadius(16)
+    }.width('100%').padding(24).backgroundColor('#F1F6FC').borderRadius(28)
+      .border({ width: 1, color: '#BFFFFFFF' })
   }
 
   build() {
@@ -338,7 +324,7 @@ export struct TimetablePage {
         this.header()
         if (this.loading) {
           Column({ space: 12 }) {
-            LoadingProgress().width(32).height(32).color('#00795C')
+            LoadingProgress().width(32).height(32).color(AppTheme.PRIMARY)
             Text('正在加载课表').fontSize(14).fontColor(AppTheme.TEXT_SECONDARY)
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else if (this.error !== '') {
@@ -349,18 +335,19 @@ export struct TimetablePage {
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).backgroundColor('#00795C').onClick(() => { this.load(); })
+          }).backgroundColor(AppTheme.PRIMARY).onClick(() => { this.load(); })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).padding(24)
         } else {
           Scroll() {
             Column({ space: 12 }) {
               if (this.weekEntries().length === 0) {
-                Text(this.entries.length === 0 ? '教师尚未安排上课时间' : '本周没有课程安排')
-                  .width('100%').fontSize(13).fontColor('#5E7067').padding(10).backgroundColor('#EAF4EE')
+                Text(this.entries.length === 0 ? '老师排课后，课程会自动出现在这里' : '这一周暂无课程安排')
+                  .width('100%').fontSize(13).fontColor(AppTheme.TEXT_SECONDARY).padding({ top: 6, bottom: 8 })
               }
               this.weekGrid()
               if (this.unscheduled().length > 0) {
-                Text(`未安排时间的课程 · ${this.unscheduled().length}`).width('100%').fontSize(16).fontWeight(FontWeight.Bold).margin({ top: 12 })
+                Text(`未安排时间的课程 · ${this.unscheduled().length}`).width('100%').fontSize(16)
+                  .fontColor(AppTheme.INK).fontWeight(FontWeight.Bold).margin({ top: 12 })
                 this.courseList(this.unscheduled())
               }
               if (this.courses.length === 0) {
@@ -369,7 +356,7 @@ export struct TimetablePage {
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).height(44).backgroundColor('#00795C').onClick(this.onJoinCourse)
+          }).height(44).backgroundColor(AppTheme.PRIMARY).onClick(this.onJoinCourse)
               }
             }.width('100%').padding({ left: 10, right: 10, bottom: 20 })
           }.layoutWeight(1).width('100%').align(Alignment.Top).scrollBar(BarState.Off)
@@ -380,20 +367,22 @@ export struct TimetablePage {
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).layoutWeight(1).height(44).borderRadius(12).fontSize(14)
-            .fontColor(AppTheme.PRIMARY).backgroundColor(AppTheme.PRIMARY_LIGHT).onClick(() => { this.showCourses = true; })
+          }).layoutWeight(1).height(46).borderRadius(18).fontSize(14)
+            .fontColor(AppTheme.PRIMARY).backgroundColor('#65C9DFF3')
+            .border({ width: 1, color: '#80FFFFFF' }).onClick(() => { this.showCourses = true; })
           Button('加入课程').stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).layoutWeight(1).height(44).borderRadius(12).fontSize(14)
-            .fontColor('#FFFFFF').backgroundColor(AppTheme.PRIMARY).onClick(this.onJoinCourse)
-        }.width('100%').padding({ left: 16, right: 16, top: 10, bottom: 12 }).backgroundColor('#FFFFFF')
+          }).layoutWeight(1).height(46).borderRadius(18).fontSize(14)
+            .fontColor('#FFFFFF').backgroundColor(AppTheme.PRIMARY)
+            .shadow({ radius: 10, color: '#24155AA5', offsetY: 4 }).onClick(this.onJoinCourse)
+        }.width('100%').padding({ left: 16, right: 16, top: 10, bottom: 12 })
       }.width('100%').height('100%')
       if (this.showCourses || this.selectedCourse !== null || this.conflictingEntries.length > 0) {
         Stack({ alignContent: Alignment.Bottom }) {
-          Column().width('100%').height('100%').backgroundColor('rgba(20,36,28,0.32)')
+          Column().width('100%').height('100%').backgroundColor('#55183250')
             .onClick(() => { this.showCourses = false; this.selectedCourse = null; this.conflictingEntries = []; })
           Scroll() {
             if (this.conflictingEntries.length > 0) {
@@ -409,10 +398,11 @@ export struct TimetablePage {
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
           })
-                    .width('100%').height(48).fontColor('#B54159').backgroundColor('#FCE7EA').borderRadius(8)
+                    .width('100%').height(48).fontColor(TimetableStyle.CONFLICT.ink)
+                    .backgroundColor(TimetableStyle.CONFLICT.top).borderRadius(16)
                     .onClick(() => { this.openEntry(entry); })
                 }, (entry: ScheduleEntry) => `${entry.id}`)
-              }.width('100%').padding(20).backgroundColor('#FFFFFF').borderRadius(8)
+              }.width('100%').padding(24).backgroundColor('#F1F6FC').borderRadius(28)
             } else if (this.selectedCourse !== null) { this.detail() }
             else {
               Column({ space: 10 }) {
@@ -426,9 +416,9 @@ export struct TimetablePage {
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).width('100%').height(44).backgroundColor('#00795C')
+          }).width('100%').height(44).backgroundColor(AppTheme.PRIMARY)
                   .onClick(() => { this.showCourses = false; this.onJoinCourse(); })
-              }.width('100%').padding(20).backgroundColor('#FFFFFF').borderRadius(8)
+              }.width('100%').padding(24).backgroundColor('#F1F6FC').borderRadius(28)
             }
           }.width('100%').constraintSize({ maxHeight: '92%', maxWidth: 520 }).align(Alignment.Bottom).scrollBar(BarState.Off)
         }.width('100%').height('100%')

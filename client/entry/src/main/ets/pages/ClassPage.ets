@@ -995,7 +995,8 @@ export struct ClassPage {
       Text(this.sessionTitle(s)).fontSize(21).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK)
         .width('100%').maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
       Text(this.sessionTagLabel(s)).fontSize(12).fontColor(AppTheme.PRIMARY).width('100%')
-      Text(`${s.resource_count ?? 0} 份资料 · ${this.personalNotes(s).length} 篇我的笔记`)
+      Text(GlobalState.isTeacher() ? `${s.resource_count ?? 0} 份资料 · 编辑与发布提纲` :
+        `${s.resource_count ?? 0} 份资料 · ${this.personalNotes(s).length} 篇我的笔记`)
         .fontSize(12).fontColor(AppTheme.TEXT_SECONDARY).width('100%')
     }.width('100%').padding(this.compact ? 20 : 24).constraintSize({ minHeight: this.compact ? 180 : 224 })
       .borderRadius(24).backgroundColor(AppTheme.BG_CARD).border({ width: 1, color: '#EDFFFFFF' })
@@ -1014,14 +1015,15 @@ export struct ClassPage {
   studentSessions() {
     Column({ space: 20 }) {
       Column({ space: 8 }) {
-        Text('课程').fontSize(this.compact ? 24 : 30).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK)
+        Text(GlobalState.isTeacher() ? '课堂' : '课程').fontSize(this.compact ? 24 : 30).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK)
         Text(`${GlobalState.course?.name ?? ''} · ${this.sessions.length} 次课堂记录`)
           .fontSize(14).fontColor(AppTheme.TEXT_SECONDARY)
       }.width('100%').alignItems(HorizontalAlign.Start)
       if (this.sessions.length === 0) {
         Column({ space: 16 }) {
           SymbolGlyph($r('sys.symbol.folder')).fontSize(44).fontColor([AppTheme.PRIMARY])
-          Text('老师发布课程提纲后，会显示在这里').fontSize(15).fontColor(AppTheme.TEXT_SECONDARY)
+          Text(GlobalState.isTeacher() ? '完成课堂录音后，可在这里编辑提纲、审核发布和添加资料。' :
+            '老师发布课程提纲后，会显示在这里').fontSize(15).fontColor(AppTheme.TEXT_SECONDARY)
         }.width('100%').padding(40).borderRadius(24).backgroundColor(AppTheme.BG_CARD)
       } else {
         Grid() {
@@ -1071,11 +1073,6 @@ export struct ClassPage {
       .height(44)
 
       Row({ space: AppTheme.SPACE_L }) {
-        if (GlobalState.isTeacher()) {
-          this.transcriptPane()
-          this.outlinePane()
-          this.resourcePane()
-        } else {
           Column() { this.outlinePane() }.layoutWeight(1.3).height('100%')
           Column({ space: 14 }) {
             MobileTabs({ labels: ['课堂转写', '教师资料'], keys: ['transcript', 'resources'], selected: this.compactPane === 'resources' ? 'resources' : 'transcript',
@@ -1084,7 +1081,6 @@ export struct ClassPage {
               if (this.compactPane === 'resources') { this.resourcePane() } else { this.transcriptPane() }
             }.width('100%').layoutWeight(1)
           }.layoutWeight(1).height('100%')
-        }
       }
       .layoutWeight(1)
       .width('100%')
@@ -1098,7 +1094,7 @@ export struct ClassPage {
   build() {
     MotionPage({ navigationKey: `${this.detailOpen ? 1 : 0}|${this.detailOpen ? this.currentSession()?.id : 'list'}|${this.compactPane}` }) {
     Stack() {
-      if (!GlobalState.isTeacher() && !this.detailOpen) {
+      if (!this.detailOpen) {
         this.studentSessions()
       } else if (this.compact) {
         Column({ space: 12 }) {
@@ -1193,7 +1189,6 @@ export struct ClassPage {
           }
         }.width('100%').height('100%').padding(16)
       } else {
-      if (GlobalState.isTeacher()) { this.pageAtmosphere() }
       if (this.detailOpen) {
         this.detailView()
       } else {
@@ -1203,7 +1198,7 @@ export struct ClassPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(GlobalState.isTeacher() ? CLASS_BG : AppTheme.BG_PAGE)
+    .backgroundColor(AppTheme.BG_PAGE)
     .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 900 || Number(newArea.height) < 550; })
     }
   }

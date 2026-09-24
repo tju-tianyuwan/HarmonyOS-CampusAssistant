@@ -2,7 +2,7 @@ import { TouchMotion } from '../common/TouchMotion';
 import { MotionPage } from '../common/components/MotionPage';
 import { promptAction } from '@kit.ArkUI';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { Api } from '../service/Api';
 import { SessionStore } from '../service/SessionStore';
 import { MotionPreferences } from '../service/MotionPreferences';

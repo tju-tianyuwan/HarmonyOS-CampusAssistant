@@ -1,5 +1,5 @@
 import { TouchMotion } from '../common/TouchMotion';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { Outline } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';

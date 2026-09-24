@@ -18,7 +18,7 @@ import { GlobalState } from '../service/GlobalState';
 
 const AI_BG: string = '#F2F7F6';
 const AI_PANEL: string = '#FFFFFF';
-const AI_SOFT: string = '#F5FFFB';
+const AI_SOFT: string = '#F2F7FE';
 const AI_BLUE: string = '#3F7DFF';
 const AI_CYAN: string = '#12BFE8';
 const AI_VIOLET: string = '#7A63F3';
@@ -629,7 +629,7 @@ export struct CourseAiPage {
         .height(2)
         .borderRadius(1)
         .rotate({ angle: -35 })
-        .backgroundColor('rgba(5,206,145,0.40)')
+        .backgroundColor('rgba(21,90,165,0.40)')
         .position({ x: 86, y: 78 })
       Column()
         .width(58)
@@ -683,7 +683,7 @@ export struct CourseAiPage {
           .textAlign(TextAlign.Center)
           .borderRadius(17)
           .backgroundColor(AppTheme.PRIMARY)
-          .shadow({ radius: 14, color: 'rgba(5,206,145,0.26)', offsetX: 0, offsetY: 6 })
+          .shadow({ radius: 14, color: 'rgba(21,90,165,0.26)', offsetX: 0, offsetY: 6 })
           .onClick(() => {
             this.newSession();
           })
@@ -745,7 +745,7 @@ export struct CourseAiPage {
               .backgroundColor(this.selectedChatIndex === index ? AppTheme.PRIMARY_LIGHT : 'transparent')
               .border({
                 width: 1,
-                color: this.selectedChatIndex === index ? 'rgba(5,206,145,0.22)' : 'rgba(18,24,24,0.06)'
+                color: this.selectedChatIndex === index ? 'rgba(21,90,165,0.22)' : 'rgba(18,24,24,0.06)'
               })
             }
           }, (cs: ChatSessionInfo) => `${cs.id}`)
@@ -849,36 +849,6 @@ export struct CourseAiPage {
   @Builder
   teacherSpotlightPanel() {
     Stack({ alignContent: Alignment.TopStart }) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .borderRadius(30)
-        .linearGradient({
-          angle: 118,
-          colors: [
-            ['#121818', 0],
-            ['#1E3A36', 0.58],
-            ['#243F55', 1]
-          ]
-        })
-      Column()
-        .width(260)
-        .height(180)
-        .borderRadius(46)
-        .rotate({ angle: -12 })
-        .backgroundColor('rgba(5,206,145,0.18)')
-        .position({ x: -70, y: -34 })
-        .translate({ x: this.pulse ? 8 : 0, y: this.pulse ? 0 : 6 })
-        .animation({ duration: 1200, curve: Curve.EaseOut })
-      Column()
-        .width(320)
-        .height(150)
-        .borderRadius(42)
-        .rotate({ angle: 9 })
-        .backgroundColor('rgba(63,125,255,0.16)')
-        .position({ x: 540, y: -36 })
-        .translate({ x: this.pulse ? -10 : 0, y: this.pulse ? 6 : 0 })
-        .animation({ duration: 1200, curve: Curve.EaseOut })
       Row() {
         Column({ space: 10 }) {
           Text('当前疑问焦点')
@@ -887,16 +857,16 @@ export struct CourseAiPage {
             .fontColor(AppTheme.PRIMARY)
             .padding({ left: 12, right: 12, top: 5, bottom: 5 })
             .borderRadius(999)
-            .backgroundColor('rgba(5,206,145,0.14)')
+            .backgroundColor(AppTheme.PRIMARY_LIGHT)
           Text(this.topKeywordText())
-            .fontSize(44)
+            .fontSize(28)
             .fontWeight(FontWeight.Bold)
-            .fontColor('#FFFFFF')
+            .fontColor(AppTheme.INK)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           Text('系统正在汇总学生在课程 AI 中提出的问题，帮助老师快速发现课堂卡点。')
             .fontSize(AppTheme.FONT_BODY)
-            .fontColor('rgba(255,255,255,0.62)')
+            .fontColor(AppTheme.TEXT_SECONDARY)
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
@@ -914,11 +884,11 @@ export struct CourseAiPage {
       .alignItems(VerticalAlign.Center)
     }
     .width('100%')
-    .height(190)
+    .height(166)
     .clip(true)
-    .borderRadius(30)
-    .border({ width: 1.2, color: 'rgba(255,255,255,0.18)' })
-    .shadow({ radius: 34, color: 'rgba(18,24,24,0.20)', offsetX: 0, offsetY: 16 })
+    .borderRadius(24)
+    .backgroundColor(AppTheme.BG_CARD)
+    .border({ width: 1, color: '#F5FFFFFF' })
   }
 
   @Builder
@@ -927,10 +897,10 @@ export struct CourseAiPage {
       Text(value)
         .fontSize(28)
         .fontWeight(FontWeight.Bold)
-        .fontColor('#FFFFFF')
+        .fontColor(AppTheme.PRIMARY)
       Text(label)
         .fontSize(11)
-        .fontColor('rgba(255,255,255,0.62)')
+        .fontColor(AppTheme.TEXT_SECONDARY)
     }
     .width(94)
     .height(86)
@@ -1151,7 +1121,7 @@ export struct CourseAiPage {
       angle: 150,
       colors: [
         ['#FFFFFF', 0],
-        ['#F8FFFC', 0.58],
+        ['#F2F7FE', 0.58],
         ['#EEF3FF', 1]
       ]
     })
@@ -1480,7 +1450,7 @@ export struct CourseAiPage {
         Text('+')
           .fontSize(18)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#121818')
+          .fontColor('#FFFFFF')
           .width(32)
           .height(32)
           .textAlign(TextAlign.Center)
@@ -1632,29 +1602,12 @@ export struct CourseAiPage {
           }.width('100%').layoutWeight(1)
         }.width('100%').height('100%').padding(12)
       } else {
-      if (GlobalState.isTeacher()) {
-      Column()
-        .width('100%')
-        .height('100%')
-        .linearGradient({
-          angle: 36,
-          colors: [
-            ['#F8FCFA', 0],
-            [AI_BG, 0.52],
-            ['#EEF3FF', 1]
-          ]
-        })
-      Column()
-        .width(560)
-        .height(520)
-        .borderRadius(70)
-        .rotate({ angle: -18 })
-        .backgroundColor('rgba(5,206,145,0.10)')
-        .position({ x: -180, y: -120 })
-      }
       Column({ space: AppTheme.SPACE_L }) {
         if (GlobalState.isTeacher()) {
-          Text('AI数据').fontSize(24).fontWeight(FontWeight.Bold).width('100%')
+          Column({ space: 8 }) {
+            Text('AI 数据').fontSize(30).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK)
+            Text('从学生的提问出发，发现教学重点').fontSize(15).fontColor(AppTheme.TEXT_SECONDARY)
+          }.width('100%').alignItems(HorizontalAlign.Start)
         } else {
           Column({ space: 8 }) {
             Text('课程 AI').fontSize(30).fontWeight(FontWeight.Bold).fontColor(AppTheme.TEXT_PRIMARY)
@@ -1686,7 +1639,7 @@ export struct CourseAiPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(GlobalState.isTeacher() ? AI_BG : AppTheme.BG_PAGE)
+    .backgroundColor(AppTheme.BG_PAGE)
     .onAreaChange((oldArea: Area, newArea: Area) => { this.compact = Number(newArea.width) < 1000 || Number(newArea.height) < 550; })
   }
 }

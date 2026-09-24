@@ -1,29 +1,29 @@
 import { AppTheme } from './AppTheme';
 import { GlobalState } from '../service/GlobalState';
 
-/** Student study surfaces: ice-blue crystal, readable ink, native material.
- * Teacher and signed-out screens retain their existing theme.
+/** Shared student/teacher surfaces: ice-blue crystal, readable ink, native material.
+ * Signed-out screens retain their existing theme.
  * Native system type and interaction feedback; no decorative animation.
  */
 export class LearningTheme {
-  private static student(): boolean { return GlobalState.user !== null && !GlobalState.isTeacher(); }
-  static get PRIMARY(): string { return this.student() ? '#155AA5' : AppTheme.PRIMARY; }
-  static get PRIMARY_DEEP(): string { return this.student() ? '#124B87' : AppTheme.PRIMARY_DEEP; }
-  static get PRIMARY_LIGHT(): string { return this.student() ? '#E0EDF9' : AppTheme.PRIMARY_LIGHT; }
-  static get INK(): string { return this.student() ? '#173A56' : AppTheme.INK; }
-  static get BG_PAGE(): string { return this.student() ? '#00ECF4FC' : AppTheme.BG_PAGE; }
-  static get BG_SUNKEN(): string { return this.student() ? '#E7EFF7' : AppTheme.BG_SUNKEN; }
-  static get BG_CARD(): string { return this.student() ? '#DEFFFFFF' : AppTheme.BG_CARD; }
+  private static signedIn(): boolean { return GlobalState.user !== null; }
+  static get PRIMARY(): string { return this.signedIn() ? '#155AA5' : AppTheme.PRIMARY; }
+  static get PRIMARY_DEEP(): string { return this.signedIn() ? '#124B87' : AppTheme.PRIMARY_DEEP; }
+  static get PRIMARY_LIGHT(): string { return this.signedIn() ? '#E0EDF9' : AppTheme.PRIMARY_LIGHT; }
+  static get INK(): string { return this.signedIn() ? '#173A56' : AppTheme.INK; }
+  static get BG_PAGE(): string { return this.signedIn() ? '#00ECF4FC' : AppTheme.BG_PAGE; }
+  static get BG_SUNKEN(): string { return this.signedIn() ? '#E7EFF7' : AppTheme.BG_SUNKEN; }
+  static get BG_CARD(): string { return this.signedIn() ? '#DEFFFFFF' : AppTheme.BG_CARD; }
   static readonly BG_WHITE: string = AppTheme.BG_WHITE;
-  static get TEXT_PRIMARY(): string { return this.student() ? '#173A56' : AppTheme.TEXT_PRIMARY; }
-  static get TEXT_SECONDARY(): string { return this.student() ? '#526D83' : AppTheme.TEXT_SECONDARY; }
-  static get TEXT_TERTIARY(): string { return this.student() ? '#60788C' : AppTheme.TEXT_TERTIARY; }
-  static get DIVIDER(): string { return this.student() ? '#D7E5F2' : AppTheme.DIVIDER; }
-  static get SUCCESS(): string { return this.student() ? '#176B55' : AppTheme.SUCCESS; }
-  static get WARNING(): string { return this.student() ? '#95601A' : AppTheme.WARNING; }
-  static get DANGER(): string { return this.student() ? '#BA4141' : AppTheme.DANGER; }
-  static get RADIUS_CARD(): number { return this.student() ? 24 : AppTheme.RADIUS_CARD; }
-  static get RADIUS_BTN(): number { return this.student() ? 16 : AppTheme.RADIUS_BTN; }
+  static get TEXT_PRIMARY(): string { return this.signedIn() ? '#173A56' : AppTheme.TEXT_PRIMARY; }
+  static get TEXT_SECONDARY(): string { return this.signedIn() ? '#526D83' : AppTheme.TEXT_SECONDARY; }
+  static get TEXT_TERTIARY(): string { return this.signedIn() ? '#60788C' : AppTheme.TEXT_TERTIARY; }
+  static get DIVIDER(): string { return this.signedIn() ? '#D7E5F2' : AppTheme.DIVIDER; }
+  static get SUCCESS(): string { return this.signedIn() ? '#176B55' : AppTheme.SUCCESS; }
+  static get WARNING(): string { return this.signedIn() ? '#95601A' : AppTheme.WARNING; }
+  static get DANGER(): string { return this.signedIn() ? '#BA4141' : AppTheme.DANGER; }
+  static get RADIUS_CARD(): number { return this.signedIn() ? 24 : AppTheme.RADIUS_CARD; }
+  static get RADIUS_BTN(): number { return this.signedIn() ? 16 : AppTheme.RADIUS_BTN; }
   static readonly RADIUS_TAG: number = AppTheme.RADIUS_TAG;
   static readonly SPACE_XS: number = AppTheme.SPACE_XS;
   static readonly SPACE_S: number = AppTheme.SPACE_S;

@@ -1,6 +1,6 @@
 import { TouchMotion } from '../common/TouchMotion';
 import { promptAction } from '@kit.ArkUI';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { AppCard } from '../common/components/AppCard';
 import { Outline } from '../model/Models';
 import { Api } from '../service/Api';

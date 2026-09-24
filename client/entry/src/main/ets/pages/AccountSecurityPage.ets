@@ -1,5 +1,5 @@
 import { TouchMotion } from '../common/TouchMotion';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
 import { UserInfo } from '../model/Models';
@@ -199,6 +199,7 @@ export struct AccountSecurityPage {
           }).width('100%').backgroundColor(AppTheme.PRIMARY).onClick(() => { this.onClose(); })
         }
       }.width('100%').constraintSize({ maxWidth: 460 }).padding(24)
-    }.width('100%').height('100%').align(Alignment.Top).backgroundColor(AppTheme.BG_PAGE)
+    }.width('100%').height('100%').align(Alignment.Top)
+      .backgroundColor(GlobalState.user === null ? AppTheme.BG_PAGE : '#ECF4FC')
   }
 }

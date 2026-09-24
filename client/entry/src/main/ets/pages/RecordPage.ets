@@ -2,23 +2,25 @@ import { TouchMotion } from '../common/TouchMotion';
 import { audio } from '@kit.AudioKit';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { Outline, TranscriptSegment } from '../model/Models';
 import { Api } from '../service/Api';
 import { RecordingStore, RecordingDraft } from '../service/RecordingStore';
 import { closeRecordingCapture } from '../service/RecordingCapture';
 import { GlobalState } from '../service/GlobalState';
+import { CrystalIcon } from '../common/components/CrystalIcon';
+import { StudyMaterial } from '../common/StudyMaterial';
 
 interface PendingChunk { seq: number; }
 
 type RecordState = 'idle' | 'recording' | 'paused' | 'finished';
 
 const CHUNK_INTERVAL_MS: number = 4000;
-const RECORD_BG: string = '#F2F7F6';
+const RECORD_BG: string = '#00ECF4FC';
 const RECORD_PANEL: string = '#FFFFFF';
-const RECORD_SOFT: string = '#F5FFFB';
+const RECORD_SOFT: string = '#F2F7FE';
 const RECORD_CYAN: string = '#12BFE8';
-const RECORD_BLUE: string = '#3F7DFF';
+const RECORD_BLUE: string = '#155AA5';
 const RECORD_VIOLET: string = '#7A63F3';
 const RECORD_AMBER: string = '#FFB84D';
 const RECORD_GLASS: string = 'rgba(255,255,255,0.90)';
@@ -31,7 +33,11 @@ const RECORD_BORDER: string = 'rgba(255,255,255,0.92)';
  */
 @Component
 export struct RecordPage {
+  startOnAppear: boolean = false;
+  onStartRequestConsumed: () => void = () => {};
+  private startRequestHandled: boolean = false;
   @StorageLink('reduceMotion') reduceMotion: boolean = false;
+  @StorageLink('crystalSoftMaterial') softMaterial: boolean = false;
   @StorageLink('classSubPage') classSubPage: string = 'record';
   @StorageLink('recordingActive') recordingActive: boolean = false;
   @State controlling: boolean = false;
@@ -81,6 +87,17 @@ export struct RecordPage {
     if (this.title === '') {
       this.title = this.defaultTitle();
     }
+    this.consumeStartRequest();
+  }
+
+  /** One user tap, consumed once. Never overwrite or auto-resume a recovered recording. */
+  private consumeStartRequest(): void {
+    if (!this.startOnAppear || this.startRequestHandled) { return; }
+    this.startRequestHandled = true;
+    this.onStartRequestConsumed();
+    if (!GlobalState.isTeacher() || GlobalState.course === null || this.recordState !== 'idle') { return; }
+    if (this.recordingStore === null) { return; }
+    this.start();
   }
 
   aboutToDisappear(): void {
@@ -487,7 +504,7 @@ export struct RecordPage {
         .height(560)
         .borderRadius(72)
         .rotate({ angle: -18 })
-        .backgroundColor('rgba(5,206,145,0.11)')
+        .backgroundColor('rgba(21,90,165,0.11)')
         .position({ x: -190, y: -120 })
       Column()
         .width(620)
@@ -618,10 +635,10 @@ export struct RecordPage {
         .width(340)
         .height(94)
         .borderRadius(47)
-        .backgroundColor(this.recordState === 'recording' ? 'rgba(5,206,145,0.08)' : 'rgba(18,24,24,0.04)')
+        .backgroundColor(this.recordState === 'recording' ? 'rgba(21,90,165,0.08)' : 'rgba(18,24,24,0.04)')
         .border({
           width: 1.2,
-          color: this.recordState === 'recording' ? 'rgba(5,206,145,0.18)' : 'rgba(18,24,24,0.06)'
+          color: this.recordState === 'recording' ? 'rgba(21,90,165,0.18)' : 'rgba(18,24,24,0.06)'
         })
       Column()
         .width(this.recordState === 'recording' ? 286 : 210)
@@ -654,18 +671,33 @@ export struct RecordPage {
     .height(104)
   }
 
-  /** 圆形操作钮（Notein 悬浮圆钮风格） */
+  /** Native, cancellable press feedback; recording actions retain their controller guards. */
   @Builder
   circleButton(label: string, size: number, bg: string, fg: string, onTap: () => void) {
-    Text(label)
-      .fontSize(size * 0.36)
-      .fontColor(fg)
+    Button({ type: ButtonType.Normal }) {
+      if (label === '■') {
+        Column().width(size * 0.3).height(size * 0.3).borderRadius(4).backgroundColor(fg)
+      } else {
+        SymbolGlyph(label === '🎙' ? $r('sys.symbol.mic') : label === '⏸' ? $r('sys.symbol.pause') :
+          label === '▶' ? $r('sys.symbol.play') : $r('sys.symbol.plus'))
+          .fontSize(size * 0.36).fontColor([fg])
+      }
+    }
       .width(size)
       .height(size)
-      .textAlign(TextAlign.Center)
-      .borderRadius(size / 2)
+      .borderRadius(size * 0.34)
       .backgroundColor(bg)
-      .shadow({ radius: 14, color: 'rgba(17,17,17,0.12)', offsetX: 0, offsetY: 4 })
+      .border({ width: 1, color: '#8FFFFFFF' })
+      .shadow({ radius: 14, color: '#28436F9D', offsetX: 0, offsetY: 5 })
+      .visualEffect(StudyMaterial.light(this.softMaterial, true)).enabled(!this.controlling)
+      .stateStyles({
+        normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+        pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'icon'))
+          .translate(TouchMotion.pressedOffset(this.reduceMotion, 'icon')).animation(TouchMotion.press(this.reduceMotion)) },
+        disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+      })
+      .accessibilityText(label === '🎙' ? '开始课堂录音' : label === '⏸' ? '暂停录音' :
+        label === '▶' ? '继续录音' : label === '■' ? '结束录音' : '准备新的课堂录音')
       .onClick(() => {
         onTap();
       })
@@ -795,16 +827,24 @@ export struct RecordPage {
 
   @Builder
   compactWorkspace() {
-    Column({ space: 10 }) {
+    Column({ space: 16 }) {
       Row() {
         this.backButton()
         Blank()
         this.statusPill()
       }.width('100%')
+      Row({ space: 12 }) {
+        CrystalIcon({ icon: $r('sys.symbol.mic'), edge: 40 })
+        Column({ space: 4 }) {
+          Text('课堂录音').fontSize(24).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK)
+          Text('记录课堂内容，整理课程提纲').fontSize(12).fontColor(AppTheme.TEXT_SECONDARY)
+        }.layoutWeight(1).alignItems(HorizontalAlign.Start)
+      }.width('100%')
       TextInput({ text: this.title, placeholder: '课时标题' }).enabled(this.recordState === 'idle')
+        .height(48).borderRadius(16).backgroundColor(AppTheme.BG_CARD).fontColor(AppTheme.INK)
         .onChange((value: string) => { this.title = value; })
       Row({ space: 16 }) {
-        Text(this.fmtDuration()).fontSize(28).fontWeight(FontWeight.Bold).layoutWeight(1)
+        Text(this.fmtDuration()).fontSize(28).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK).layoutWeight(1)
         if (this.recordState === 'idle') {
           Button('开始录音').stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
@@ -842,6 +882,7 @@ export struct RecordPage {
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
           }).layoutWeight(1).backgroundColor(this.compactTab === 'transcript' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
+          .fontColor(this.compactTab === 'transcript' ? '#FFFFFF' : AppTheme.PRIMARY)
           .onClick(() => { this.compactTab = 'transcript'; })
         if (this.recordState === 'finished') {
           Button('提纲').stateStyles({
@@ -850,6 +891,7 @@ export struct RecordPage {
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
           }).layoutWeight(1).backgroundColor(this.compactTab === 'outline' ? AppTheme.PRIMARY : AppTheme.PRIMARY_LIGHT)
+            .fontColor(this.compactTab === 'outline' ? '#FFFFFF' : AppTheme.PRIMARY)
             .onClick(() => { this.compactTab = 'outline'; })
         }
       }.width('100%')
@@ -857,8 +899,19 @@ export struct RecordPage {
         this.outlinePanel()
       } else {
         List({ space: 12 }) {
+          if (this.segments.length === 0) {
+            ListItem() {
+              Column({ space: 12 }) {
+                SymbolGlyph($r('sys.symbol.waveform')).fontSize(32).fontColor([AppTheme.PRIMARY])
+                Text(this.recordState === 'idle' ? '准备好后，开始记录这一堂课' : '正在等待课堂转写')
+                  .fontSize(16).fontColor(AppTheme.INK).textAlign(TextAlign.Center)
+                Text('语音转写会按时间顺序显示在这里').fontSize(13).fontColor(AppTheme.TEXT_SECONDARY)
+              }.padding(28).width('100%').borderRadius(24).backgroundColor(AppTheme.BG_CARD)
+            }
+          }
           ForEach(this.segments, (segment: TranscriptSegment) => {
-            ListItem() { Text(segment.text).width('100%').fontSize(15).padding(12).backgroundColor('#FFFFFF') }
+            ListItem() { Text(segment.text).width('100%').fontSize(15).lineHeight(25).fontColor(AppTheme.INK)
+              .padding(20).borderRadius(20).backgroundColor(AppTheme.BG_CARD) }
           }, (segment: TranscriptSegment) => `${segment.seq}`)
         }.width('100%').layoutWeight(1)
       }
@@ -868,20 +921,19 @@ export struct RecordPage {
   build() {
     Stack() {
       if (this.compact) { this.compactWorkspace() } else {
-      this.recordAtmosphere()
 
       Column({ space: AppTheme.SPACE_L }) {
         Row() {
           this.backButton()
           Blank()
           Row({ space: 8 }) {
-            Text('REC STUDIO')
+            Text('课堂记录')
               .fontSize(11)
               .fontWeight(FontWeight.Bold)
-              .fontColor('#121818')
+              .fontColor(AppTheme.PRIMARY)
               .padding({ left: 12, right: 12, top: 5, bottom: 5 })
               .borderRadius(999)
-              .backgroundColor(RECORD_AMBER)
+              .backgroundColor(AppTheme.PRIMARY_LIGHT)
             Text('课堂录音')
               .fontSize(11)
               .fontColor(AppTheme.TEXT_SECONDARY)
@@ -908,20 +960,6 @@ export struct RecordPage {
                   ['#EEF3FF', 1]
                 ]
               })
-            Column()
-              .width(260)
-              .height(210)
-              .borderRadius(48)
-              .rotate({ angle: -14 })
-              .backgroundColor('rgba(5,206,145,0.14)')
-              .position({ x: -82, y: -40 })
-            Column()
-              .width(210)
-              .height(180)
-              .borderRadius(44)
-              .rotate({ angle: 12 })
-              .backgroundColor('rgba(63,125,255,0.14)')
-              .position({ x: 210, y: 390 })
             Row() {
               Text('录音仪表盘')
                 .fontSize(AppTheme.FONT_BODY)
@@ -1034,20 +1072,7 @@ export struct RecordPage {
         Column() {
           if (this.segments.length === 0) {
             Column({ space: AppTheme.SPACE_M }) {
-              Stack({ alignContent: Alignment.Center }) {
-                Column()
-                  .width(96)
-                  .height(96)
-                  .borderRadius(32)
-                  .rotate({ angle: -10 })
-                  .backgroundColor(AppTheme.tagBg(RECORD_CYAN))
-                Text('听')
-                  .fontSize(38)
-                  .fontWeight(FontWeight.Bold)
-                  .fontColor(RECORD_CYAN)
-              }
-              .width(120)
-              .height(112)
+              CrystalIcon({ icon: $r('sys.symbol.waveform'), edge: 72 })
               Text(this.recordState === 'idle' ?
                 '开始录音后，转写文字将在此显示' : '等待首个分片转写…')
                 .fontSize(AppTheme.FONT_BODY)

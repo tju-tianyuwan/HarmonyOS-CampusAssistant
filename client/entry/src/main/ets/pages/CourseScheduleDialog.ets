@@ -1,5 +1,5 @@
 import { TouchMotion } from '../common/TouchMotion';
-import { AppTheme } from '../common/AppTheme';
+import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { ClassCourse } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
@@ -229,8 +229,8 @@ export struct CourseScheduleDialog {
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).width('100%').height(40).borderRadius(8)
-                .backgroundColor('#E8EFFF').fontColor('#305FC3').onClick(() => { this.chooseSemester(); })
+          }).width('100%').height(40).borderRadius(16)
+                .backgroundColor(AppTheme.PRIMARY_LIGHT).fontColor(AppTheme.PRIMARY).onClick(() => { this.chooseSemester(); })
               ForEach(this.slots, (slot: SlotDraft, index: number) => {
                 SlotEditor({ slot: slot, index: index,
                   onRemove: () => { this.slots = this.slots.filter((item: SlotDraft) => item.key !== slot.key); } })
@@ -240,8 +240,8 @@ export struct CourseScheduleDialog {
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).width('100%').height(40).borderRadius(8).enabled(this.slots.length < 40)
-                .fontColor('#305FC3').backgroundColor('#E8EFFF')
+          }).width('100%').height(40).borderRadius(16).enabled(this.slots.length < 40)
+                .fontColor(AppTheme.PRIMARY).backgroundColor(AppTheme.PRIMARY_LIGHT)
                 .onClick(() => { this.slots = [...this.slots, new SlotDraft()]; })
             }.width('100%')
           }.width('100%').layoutWeight(1).scrollBar(BarState.Auto).enabled(!this.busy)
@@ -253,10 +253,11 @@ export struct CourseScheduleDialog {
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
           })
-          .width('100%').height(44).borderRadius(8).backgroundColor('#305FC3')
+          .width('100%').height(44).borderRadius(16).backgroundColor(AppTheme.PRIMARY)
           .enabled(!this.busy && !this.loading && !this.loadFailed).onClick(() => { this.save(); })
       }.width('92%').height('90%').constraintSize({ maxWidth: 520, maxHeight: 760 })
-        .padding(20).backgroundColor('#FFFFFF').borderRadius(8)
+        .padding(24).backgroundColor('#F7FAFE').borderRadius(28)
+        .border({ width: 1, color: '#FFFFFF' }).shadow({ radius: 28, color: '#28345277', offsetY: 12 })
     }.width('100%').height('100%')
   }
 }
