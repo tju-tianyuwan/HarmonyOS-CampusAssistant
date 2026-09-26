@@ -1,0 +1,63 @@
+{
+  "captured_at": "2026-09-26",
+  "source": "HarmonyOS emulator 127.0.0.1:5555",
+  "bundle": "com.demo.smartstudy",
+  "method": "hdc uitest screenCap",
+  "screens": [
+    {
+      "name": "home",
+      "file": "home.webp",
+      "width": 2880,
+      "height": 1920,
+      "source_sha256": "ac4d1cad7c9529d060c725493d486f5e87cf65a99c92eafc53ee40d3477de52b"
+    },
+    {
+      "name": "ai",
+      "file": "ai.webp",
+      "width": 2880,
+      "height": 1920,
+      "source_sha256": "fc88b0e76ea3d1543ebaa031037ec1ddff65c94d9df6bbb5c170d697be0f9c32"
+    },
+    {
+      "name": "group",
+      "file": "group.webp",
+      "width": 2880,
+      "height": 1920,
+      "source_sha256": "304cb8109a18682ceaceae987b06eba6c0de2f5e6facfd3563bc2a6a89824054"
+    },
+    {
+      "name": "notes",
+      "file": "notes.webp",
+      "width": 2880,
+      "height": 1920,
+      "source_sha256": "420ea5d5c70c22bcbd587353a757d671ab1853568d80fd39e5dc562c2d1acbd2"
+    },
+    {
+      "name": "practice",
+      "file": "practice.webp",
+      "width": 2880,
+      "height": 1920,
+      "source_sha256": "d6adb29f9b7ad405c79cc34befbb557aea39fa4e33b98b8418b575a8655031a8"
+    },
+    {
+      "name": "selected",
+      "file": "selected.webp",
+      "width": 2880,
+      "height": 1920,
+      "source_sha256": "e73065d2c2a24b7887fa34b4bfceb168181f729f2086c5b3a500f1c455c49044"
+    },
+    {
+      "name": "result",
+      "file": "result.webp",
+      "width": 2880,
+      "height": 1920,
+      "source_sha256": "d87fd8964fb002abb8a8240625620ee0e3f3828b2038bf2bb270e1878683f2b9"
+    }
+  ],
+  "notes": [
+    "Fresh capture from the running current client, no legacy screenshots.",
+    "Existing personal test account; AI and group screens show initial states.",
+    "Practice uses the built-in sample question; answer selection and submission change only in-memory page state.",
+    "Presentation media crops system bars; image content is not reconstructed."
+  ]
+}

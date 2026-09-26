@@ -120,7 +120,9 @@ async def process(room_id: int, force: bool = False, ending: bool = False):
             pending = db.exec(select(MeetingMessage).where(MeetingMessage.room_id == room_id,
                 MeetingMessage.role == "user", MeetingMessage.id > room.processed_message_id)
                 .order_by(MeetingMessage.id).limit(8)).all()
-            age = (datetime.utcnow() - room.last_activity).total_seconds()
+            # Legacy rows use naive UTC; imported rows may carry an explicit offset.
+            now = datetime.now(room.last_activity.tzinfo) if room.last_activity.tzinfo else datetime.utcnow()
+            age = (now - room.last_activity).total_seconds()
             if not force and pending and len(pending) < 8 and age < room.buffer_seconds:
                 return
             if not pending:

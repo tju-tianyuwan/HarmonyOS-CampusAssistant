@@ -1,6 +1,6 @@
 import { fileIo } from '@kit.CoreFileKit';
 
-export interface RecordingDraft { sessionId: number; title: string; nextSeq: number; }
+export interface RecordingDraft { sessionId: number; title: string; nextSeq: number; realtime?: boolean; }
 
 export class RecordingStore {
   private directory: string;
@@ -31,6 +31,33 @@ export class RecordingStore {
   append(seq: number, data: ArrayBuffer): void {
     this.write(`${this.directory}/${seq}.tmp`, data);
     fileIo.renameSync(`${this.directory}/${seq}.tmp`, `${this.directory}/${seq}.pcm`);
+  }
+
+  appendRealtime(seq: number, data: ArrayBuffer): void {
+    const path = `${this.directory}/${seq}.pcm`;
+    const file = fileIo.openSync(path, fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE);
+    const previousSize = fileIo.statSync(file.fd).size;
+    try {
+      const written = fileIo.writeSync(file.fd, data, { offset: previousSize });
+      if (written !== data.byteLength) { throw new Error('录音缓存写入不完整'); }
+      fileIo.fsyncSync(file.fd);
+    } catch (e) {
+      fileIo.truncateSync(file.fd, previousSize);
+      throw new Error((e as Error).message);
+    } finally { fileIo.closeSync(file); }
+  }
+
+  readFrame(seq: number, offset: number): ArrayBuffer {
+    const file = fileIo.openSync(`${this.directory}/${seq}.pcm`, fileIo.OpenMode.READ_ONLY);
+    try {
+      const size = fileIo.statSync(file.fd).size;
+      const length = Math.max(0, Math.min(6400, size - offset));
+      const data = new ArrayBuffer(length);
+      if (length > 0 && fileIo.readSync(file.fd, data, { offset: offset, length: length }) !== length) {
+        throw new Error('录音缓存读取不完整');
+      }
+      return data;
+    } finally { fileIo.closeSync(file); }
   }
 
   pending(): number[] {

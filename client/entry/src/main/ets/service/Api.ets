@@ -14,13 +14,9 @@ export interface StreamCallbacks {
   onError: (msg: string) => void;
 }
 
-/**
- * 网络层。
- * 模拟器访问宿主机：QEMU NAT 下宿主机回环地址为 10.0.2.2；
- * 若不通，改为电脑局域网 IP，并用 --host 0.0.0.0 启动服务端。
- */
+/** 网络版固定连接智伴云服务；ohosTest 独立测试包使用隔离服务。 */
 export class Api {
-  static BASE_URL: string = 'http://10.0.2.2:8000/api/v1';
+  static BASE_URL: string = 'http://zhiban.help:8000/api/v1';
   private static readonly TIMEOUT_MS: number = 30000;
 
   static token: string = '';

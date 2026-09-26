@@ -185,3 +185,78 @@ test('invalid course, student identity or unavailable cache cannot auto-start ca
     page.consumeStartRequest(); assert.deepEqual(events, ['request-consumed'], condition);
   }
 });
+
+function realtimeSetup() {
+  const h = setup();
+  const files = new Map();
+  h.page.realtime = true;
+  h.page.seq = 0;
+  h.page.pendingBuffers = [];
+  h.page.recordingStore = {
+    appendRealtime(seq, data) {
+      const previous = files.get(seq) || new Uint8Array(0);
+      const joined = new Uint8Array(previous.byteLength + data.byteLength);
+      joined.set(previous); joined.set(new Uint8Array(data), previous.byteLength);
+      files.set(seq, joined);
+    },
+    save(draft) { h.draft = draft; },
+    readFrame(seq, offset) { return files.get(seq).slice(offset, offset + 6400).buffer; },
+    remove(seq) { files.delete(seq); },
+    finish() {}
+  };
+  h.files = files;
+  return h;
+}
+
+test('realtime PCM windows split exactly at 60 seconds and recovery seals the active window', () => {
+  const h = realtimeSetup();
+  h.page.pendingBuffers = [new Uint8Array(1920000 + 3200).buffer];
+  h.page.cacheBuffers();
+  assert.equal(h.files.get(0).byteLength, 1920000);
+  assert.equal(h.files.get(1).byteLength, 3200);
+  assert.equal(h.page.seq, 1);
+  assert.equal(h.page.realtimeBytes, 3200);
+  assert.equal(h.draft.nextSeq, 2);
+  assert.equal(h.draft.realtime, true);
+});
+
+test('realtime cache failure retains unsaved PCM instead of losing microphone data', () => {
+  const h = realtimeSetup();
+  h.page.pendingBuffers = [new Uint8Array(3200).buffer];
+  h.page.recordingStore.appendRealtime = () => { throw new Error('disk full'); };
+  assert.throws(() => h.page.cacheBuffers(), /disk full/);
+  assert.equal(h.page.pendingBuffers[0].byteLength, 3200);
+  assert.equal(h.page.seq, 0);
+  assert.equal(h.page.uploadQueue.length, 0);
+});
+
+test('realtime pause seals partial window before waiting for active uploader', async () => {
+  const h = realtimeSetup();
+  h.page.pendingBuffers = [new Uint8Array(3200).buffer];
+  h.page.flushChunk = h.context.RecordPage.prototype.flushChunk;
+  h.page.drainRealtime = async () => {
+    assert.equal(h.page.seq, 1);
+    assert.equal(h.page.realtimeBytes, 0);
+  };
+  await h.page.flushChunk(true);
+  assert.equal(h.files.get(0).byteLength, 3200);
+});
+
+test('lost commit acknowledgement is retried without duplicating visible transcript', async () => {
+  const h = realtimeSetup();
+  h.context.Api.token = 'token';
+  h.page.pendingBuffers = [new Uint8Array(3200).buffer];
+  h.page.cacheBuffers(); h.page.seq = 1; h.page.realtimeBytes = 0;
+  const row = { id: 9, seq: 0, start_ms: 0, end_ms: 100, text: 'saved' };
+  h.page.segments = [row];
+  h.context.RealtimeRecording = class {
+    async open() {}
+    committed() { return row; }
+    close() {}
+    static async delay() {}
+  };
+  await h.page.drainRealtime();
+  assert.equal(h.page.segments.length, 1);
+  assert.equal(h.page.uploadQueue.length, 0);
+  assert.equal(h.files.size, 0);
+});

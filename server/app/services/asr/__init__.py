@@ -22,6 +22,8 @@ def get_asr_provider() -> ASRProvider:
             _provider = OpenAICompatibleASRProvider()
         elif name in {"huawei_sis", "sis"}:
             _provider = HuaweiSISASRProvider()
+        elif name == "huawei_sis_realtime":
+            raise ASRError("当前使用实时识别，请升级客户端并通过实时录音通道提交音频")
         else:
             raise ASRError(f"未实现的 ASR provider: {name}")
     return _provider
@@ -35,7 +37,7 @@ def is_asr_configured() -> bool:
         return (model_path() / "model.bin").is_file()
     if name in {"openai", "openai_compatible"}:
         return bool(settings.asr_api_key.strip() and settings.asr_model.strip())
-    if name in {"huawei_sis", "sis"}:
+    if name in {"huawei_sis", "sis", "huawei_sis_realtime"}:
         return all(
             value.strip()
             for value in (
@@ -43,7 +45,7 @@ def is_asr_configured() -> bool:
                 settings.sis_sk,
                 settings.sis_project_id,
                 settings.sis_region,
-                settings.sis_property,
+                settings.sis_realtime_property if name == "huawei_sis_realtime" else settings.sis_property,
             )
         )
     return False

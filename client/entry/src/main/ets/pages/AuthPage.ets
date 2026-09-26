@@ -2,7 +2,6 @@ import { TouchMotion } from '../common/TouchMotion';
 import { AppTheme } from '../common/AppTheme';
 import { AuthResponse } from '../model/Models';
 import { Api } from '../service/Api';
-import { SessionStore } from '../service/SessionStore';
 import { AccountSecurityPage } from './AccountSecurityPage';
 
 interface Credentials {
@@ -36,8 +35,6 @@ export struct AuthPage {
   @State busy: boolean = false;
   @State sending: boolean = false;
   @State cooldown: number = 0;
-  @State server: string = Api.BASE_URL;
-  @State editServer: boolean = false;
   private timer: number = -1;
 
   aboutToDisappear(): void {
@@ -156,13 +153,6 @@ export struct AuthPage {
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
           }).width('100%').height(46)
           .backgroundColor(AppTheme.PRIMARY).enabled(!this.busy).onClick(() => { this.submit(); })
-        Button('服务器设置').stateStyles({
-            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
-            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
-              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
-            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).backgroundColor(Color.Transparent).fontColor(AppTheme.TEXT_SECONDARY)
-          .onClick(() => { this.editServer = !this.editServer; })
         if (!this.registering) {
           Button('忘记密码').stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
@@ -171,22 +161,6 @@ export struct AuthPage {
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
           }).backgroundColor(Color.Transparent).fontColor(AppTheme.PRIMARY_DEEP)
             .enabled(!this.busy).onClick(() => { this.recovering = true; })
-        }
-        if (this.editServer) {
-          TextInput({ text: this.server }).height(44).onChange((v: string) => { this.server = v; })
-          Button('保存地址').stateStyles({
-            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
-            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
-              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
-            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).onClick(() => {
-            const url = this.server.trim().replace(/\/+$/, '');
-            if (!/^https?:\/\/[^\s/?#@]+(?:\/[^\s?#]*)?\/api\/v1$/.test(url)) { this.message = '请输入有效的服务器 API 地址'; return; }
-            Api.BASE_URL = url;
-            Api.setAccessToken('');
-            SessionStore.save(url, '').catch(() => {});
-            this.editServer = false;
-          })
         }
       }.width('100%').constraintSize({ maxWidth: 460 }).padding(28)
     }.width('100%').height('100%').align(Alignment.Top).backgroundColor('#F1FBF8')

@@ -56,7 +56,7 @@ if (!(Test-Path .env)) { Copy-Item .env.example .env }
 - Swagger API：`http://127.0.0.1:8000/docs`
 - API 前缀：`http://127.0.0.1:8000/api/v1`
 
-`.env.example` 包含 LLM、ASR、OCR、Embedding、数据库和存储目录配置。ASR 默认使用本地 CPU Whisper，模型下载后无需语音服务密钥；OCR 默认使用本地 RapidOCR。未安装语音模型会明确报错，只有显式设置 `ASR_PROVIDER=mock` 才使用模拟转写。未配置 LLM 时仍使用演示回答。
+`.env.example` 包含 LLM、ASR、OCR、Embedding、数据库和存储目录配置。课堂 ASR 使用华为云 SIS 连续实时识别（`ASR_PROVIDER=huawei_sis_realtime`），支持中间字幕、最终结果确认和缓存重放，配置见 [部署说明](server/DEPLOYMENT.md)。需填写有效的 `SIS_AK`、`SIS_SK` 和对应区域项目 ID 并开通实时识别；本机已使用新凭据完成真实中文转写验证。可显式选择 `local` 使用已下载的 CPU Whisper；OCR 默认使用本地 RapidOCR。未配置 LLM 时仍使用演示回答。
 
 默认单进程；同机多进程需使用 `run.py`，启用向量检索时必须连接共享 Chroma HTTP 服务，详见 [部署说明](server/DEPLOYMENT.md)。原有用户和课程保留，但预置身份不再能直接登录。首次启动后，可在服务端本机给原有教师绑定学校账号；密码通过隐藏输入读取，不写入命令行：
 
@@ -73,7 +73,7 @@ if (!(Test-Path .env)) { Copy-Item .env.example .env }
 2. 等待 Hvigor Sync 完成。
 3. 在 `Project Structure > Signing Configs` 中为本机生成调试或发布签名。
 4. 启动 API 12+ 的 Tablet、2in1 或 Phone 设备，运行 `entry` 模块。
-5. 模拟器默认通过 `http://10.0.2.2:8000/api/v1` 访问宿主机；真机请在应用设置页填写电脑局域网地址。
+5. 网络版固定连接 `http://zhiban.help:8000/api/v1`，模拟器和真机使用相同地址；登录页与设置页均不提供服务器地址编辑。旧版本其他服务器的登录态不自动迁移，需要重新登录。
 
 签名证书、密码、HAP、`oh_modules` 和构建缓存均不进入 Git 仓库。
 
@@ -121,4 +121,4 @@ cd server
 
 手写笔记支持本机草稿、离开提示与恢复，并按画布尺寸缩放跨设备笔迹。课程知识检索仍由后台维护；工作台中的“课程提纲”仅向课程教师显示 AI 生成的官方提纲。学习总结可导出 Markdown。手机竖屏采用紧凑导航、分栏切换与换行操作栏，平板保留现有工作台。
 
-离线比赛版仍保留演示逻辑。手机和平板模拟器已验证主要页面及手写保存/恢复；本地中文 ASR 和 OCR 已实际调用验证。M-Pencil 压感、系统隔空传送、课堂噪声识别准确率和录音缓存恢复仍需真机验收。当前华为 SIS 配置实测返回 401，已使用本地 ASR；发布前还需完成签名、真实 SMTP/LLM/Embedding 验证。
+离线比赛版仍保留演示逻辑。此前手机和平板模拟器已验证主要页面及手写保存/恢复，本地中文 ASR 和 OCR 已实际调用验证。华为云实时 ASR 已使用新凭据完成中文音频转写；MatePad Pro 13 模拟器已通过真实网络/存储加模拟云端的 4 组设备集成测试。课堂噪声准确率、端到端字幕延迟和 60 秒连接边界仍需实录验收；发布前还需完成签名、M-Pencil 压感、系统隔空传送、真实 SMTP/LLM/Embedding 验证。

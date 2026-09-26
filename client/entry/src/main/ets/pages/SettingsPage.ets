@@ -3,8 +3,6 @@ import { MotionPage } from '../common/components/MotionPage';
 import { promptAction } from '@kit.ArkUI';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { LearningTheme as AppTheme } from '../common/LearningTheme';
-import { Api } from '../service/Api';
-import { SessionStore } from '../service/SessionStore';
 import { MotionPreferences } from '../service/MotionPreferences';
 import { GlobalState } from '../service/GlobalState';
 import { CollabManager } from '../service/collab/CollabManager';
@@ -13,7 +11,7 @@ import { transferService } from '../service/collab/TransferService';
 import { AccountSecurityPage } from './AccountSecurityPage';
 
 /**
- * 设置（覆盖层）：账号信息 / 服务器地址 / 协同能力开关（NFC·局域网互抓·跨端接续，默认开启）。
+ * 设置（覆盖层）：账号信息 / 协同能力开关（NFC·局域网互抓·跨端接续，默认开启）。
  * 协同能力集中在此以开关形式管理，不再占用独立页签。
  */
 @Component
@@ -27,7 +25,6 @@ export struct SettingsPage {
   @State securityOpen: boolean = false;
   @State lanOn: boolean = GlobalState.lanGrabEnabled;
   @State continueOn: boolean = GlobalState.continuationEnabled;
-  @State serverUrl: string = Api.BASE_URL;
   @State nfcLog: string = '';
   @State lanLog: string = '';
 
@@ -254,42 +251,8 @@ export struct SettingsPage {
             }
           })
 
-        // 服务器
-        this.sectionTitle('服务器地址')
-        TextInput({ text: this.serverUrl })
-          .fontSize(AppTheme.FONT_CAPTION)
-          .height(44)
-          .borderRadius(AppTheme.RADIUS_CARD)
-          .backgroundColor(AppTheme.BG_SUNKEN)
-          .onChange((v: string) => {
-            this.serverUrl = v;
-          })
-        Button('保存服务器地址').stateStyles({
-            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
-            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
-              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
-            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          })
-          .width('100%')
-          .height(42)
-          .fontSize(AppTheme.FONT_BODY)
-          .fontColor('#FFFFFF')
-          .backgroundColor(AppTheme.PRIMARY)
-          .borderRadius(999)
-          .onClick(() => {
-            const url = this.serverUrl.trim().replace(/\/+$/, '');
-            if (!/^https?:\/\/[^\s/?#@]+(?:\/[^\s?#]*)?\/api\/v1$/.test(url)) {
-              this.toast('请输入有效的服务器 API 地址'); return;
-            }
-            if (url !== Api.BASE_URL) {
-              if (AppStorage.get<boolean>('recordingActive') === true) { this.toast('请先结束录音'); return; }
-              this.onLogout();
-              Api.BASE_URL = url;
-              SessionStore.save(url, '').catch(() => {});
-            }
-            this.toast('服务器地址已保存');
-          })
-          }
+
+      }
           .width('100%')
         }
         .layoutWeight(1)
