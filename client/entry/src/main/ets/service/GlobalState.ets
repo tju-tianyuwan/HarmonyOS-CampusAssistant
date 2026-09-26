@@ -69,6 +69,11 @@ export class GlobalState {
   }
 
   static setCourse(course: ClassCourse | null): void {
+    if (GlobalState.course?.id !== course?.id) {
+      GlobalState.currentSessionId = -1;
+      GlobalState.pendingNoteSessionId = -1;
+      GlobalState.pendingOpenNoteId = -1;
+    }
     GlobalState.course = course;
   }
 

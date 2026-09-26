@@ -1,4 +1,5 @@
 import { TouchMotion } from '../common/TouchMotion';
+import { MarkdownView } from '../common/components/MarkdownView';
 import { audio } from '@kit.AudioKit';
 import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 import { promptAction } from '@kit.ArkUI';
@@ -51,6 +52,7 @@ export struct RecordPage {
   @State outlineData: Outline | null = null;
   @State outlineText: string = '';
   @State outlineDirty: boolean = false;
+  @State outlinePreview: boolean = true;
   @State generatingOutline: boolean = false;
   @State savingOutline: boolean = false;
   @State publishingOutline: boolean = false;
@@ -757,6 +759,14 @@ export struct RecordPage {
       }
       .width('100%')
 
+      if (this.outlineData !== null && this.outlineData.status !== 'published') {
+        Button(this.outlinePreview ? '编辑提纲源码' : '预览提纲与公式').height(32)
+          .onClick(() => { this.outlinePreview = !this.outlinePreview; })
+      }
+      if (this.outlineText.trim() !== '' && (this.outlinePreview || this.outlineData?.status === 'published')) {
+        Column() { MarkdownView({ content: this.outlineText }) }
+          .layoutWeight(1).width('100%').borderRadius(22).backgroundColor('rgba(255,255,255,0.76)')
+      } else {
       TextArea({ text: this.outlineText, placeholder: '录音结束后点击「生成提纲」，校准后保存。' })
       .layoutWeight(1)
       .width('100%')
@@ -768,6 +778,7 @@ export struct RecordPage {
         this.outlineText = v;
           this.outlineDirty = true;
         })
+      }
 
       Row({ space: AppTheme.SPACE_M }) {
         Button(this.generatingOutline ? '生成中…' : '生成提纲').stateStyles({

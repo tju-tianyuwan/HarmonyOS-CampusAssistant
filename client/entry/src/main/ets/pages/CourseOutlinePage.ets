@@ -3,6 +3,7 @@ import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { Outline } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
+import { MarkdownView } from '../common/components/MarkdownView';
 
 interface CourseOutline extends Outline {
   session_title: string;
@@ -99,13 +100,8 @@ export struct CourseOutlinePage {
       Text(this.selectedOutline === null ? '' :
         `更新于 ${this.formatTime(this.selectedOutline.updated_at)}`)
         .fontSize(12).fontColor(AppTheme.TEXT_TERTIARY).width('100%')
-      Scroll() {
-        Text(this.selectedOutline === null ? '' : this.selectedOutline.markdown)
-          .fontSize(15)
-          .fontColor(AppTheme.TEXT_PRIMARY)
-          .lineHeight(24)
-          .width('100%')
-          .copyOption(CopyOptions.InApp)
+      Column() {
+        MarkdownView({ content: this.selectedOutline === null ? '' : this.selectedOutline.markdown })
       }
       .layoutWeight(1)
       .width('100%')

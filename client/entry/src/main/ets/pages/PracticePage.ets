@@ -37,6 +37,7 @@ interface PracticeGenerationResponse {
 
 interface GeneratePracticeBody {
   class_course_id: number;
+  session_id?: number;
   user_id: number;
   count: number;
   mode: string;
@@ -46,99 +47,18 @@ interface GeneratePracticeBody {
 }
 
 const PRACTICE_MODES: string[] = ['智能组卷', '章节巩固', '错题强化'];
-const PRACTICE_TOPICS: string[] = ['综合', '二叉树', '图', '排序'];
+interface PracticeTopic { name: string; source_count: number; }
+interface PracticeContext {
+  class_course_id: number;
+  course_name: string;
+  session_id: number | null;
+  session_title: string;
+  knowledge_count: number;
+  topics: PracticeTopic[];
+  knowledge_sources: string[];
+}
 const PRACTICE_DIFFICULTIES: string[] = ['综合', '基础', '适中', '进阶'];
 
-const QUESTION_BANK: PracticeQuestion[] = [
-  {
-    id: 101,
-    type: '单选题',
-    difficulty: '基础',
-    topic: '二叉树',
-    stem: '一棵二叉树的中序遍历序列遵循哪一种访问顺序？',
-    options: ['根节点、左子树、右子树', '左子树、根节点、右子树', '左子树、右子树、根节点', '按层从左到右访问'],
-    answer: 1,
-    explanation: '中序遍历先递归访问左子树，再访问根节点，最后访问右子树。对二叉搜索树执行中序遍历可得到有序序列。',
-    source: '第 5 讲 · 二叉树遍历'
-  },
-  {
-    id: 102,
-    type: '单选题',
-    difficulty: '适中',
-    topic: '二叉树',
-    stem: '含有 n 个节点的完全二叉树采用顺序存储时，编号为 i 的节点左孩子编号通常是？',
-    options: ['i + 1', '2i', '2i + 1', 'i / 2'],
-    answer: 1,
-    explanation: '在节点编号从 1 开始的顺序存储中，节点 i 的左孩子为 2i，右孩子为 2i + 1，父节点为 floor(i / 2)。',
-    source: '第 6 讲 · 完全二叉树'
-  },
-  {
-    id: 103,
-    type: '概念判断',
-    difficulty: '基础',
-    topic: '图',
-    stem: '无向连通图的任意两个顶点之间都至少存在一条路径。',
-    options: ['正确', '错误', '仅完全图正确', '仅树结构正确'],
-    answer: 0,
-    explanation: '连通图的定义就是任意两个顶点之间均存在路径。完全图要求任意两点之间直接有边，条件更强。',
-    source: '第 8 讲 · 图的基本概念'
-  },
-  {
-    id: 104,
-    type: '单选题',
-    difficulty: '进阶',
-    topic: '图',
-    stem: '使用邻接表存储含 n 个顶点、e 条边的无向图，其空间复杂度为？',
-    options: ['O(n)', 'O(e)', 'O(n + e)', 'O(n²)'],
-    answer: 2,
-    explanation: '邻接表需要 n 个顶点表节点，并为无向图的每条边保存两个边节点，总空间复杂度为 O(n + e)。',
-    source: '第 9 讲 · 图的存储结构'
-  },
-  {
-    id: 105,
-    type: '单选题',
-    difficulty: '适中',
-    topic: '排序',
-    stem: '下列排序算法中，在最坏情况下时间复杂度仍为 O(n log n) 的是？',
-    options: ['快速排序', '冒泡排序', '归并排序', '直接插入排序'],
-    answer: 2,
-    explanation: '归并排序在最好、平均和最坏情况下均为 O(n log n)。快速排序最坏情况下会退化到 O(n²)。',
-    source: '第 12 讲 · 内部排序'
-  },
-  {
-    id: 106,
-    type: '单选题',
-    difficulty: '基础',
-    topic: '排序',
-    stem: '直接插入排序在待排序序列已经有序时，其时间复杂度为？',
-    options: ['O(1)', 'O(log n)', 'O(n)', 'O(n²)'],
-    answer: 2,
-    explanation: '序列已有序时，每个元素只需与前一个元素比较一次，不发生移动，因此时间复杂度为 O(n)。',
-    source: '第 11 讲 · 插入排序'
-  },
-  {
-    id: 107,
-    type: '应用题',
-    difficulty: '进阶',
-    topic: '二叉树',
-    stem: '已知一棵二叉树的前序序列为 ABDECF，中序序列为 DBEAFC，则其根节点的右子树根节点是？',
-    options: ['B', 'C', 'D', 'F'],
-    answer: 1,
-    explanation: '前序序列首元素 A 为根。A 在中序序列中把左右子树分为 DBE 和 FC，右子树前序部分为 CF，所以右子树根节点为 C。',
-    source: '第 7 讲 · 遍历序列还原'
-  },
-  {
-    id: 108,
-    type: '单选题',
-    difficulty: '适中',
-    topic: '图',
-    stem: '对无权图求单源最短路径时，优先选择哪一种遍历策略？',
-    options: ['深度优先搜索', '广度优先搜索', '拓扑排序', '关键路径算法'],
-    answer: 1,
-    explanation: '无权图中每条边代价相同，广度优先搜索按路径长度逐层扩展，首次到达顶点时即可得到最短路径。',
-    source: '第 10 讲 · 图的遍历'
-  }
-];
 
 @Component
 export struct PracticePage {
@@ -147,24 +67,45 @@ export struct PracticePage {
   @State selectedTopic: string = '综合';
   @State selectedDifficulty: string = '综合';
   @State requirementText: string = '';
-  @State questionBank: PracticeQuestion[] = QUESTION_BANK;
-  @State questionIndexes: number[] = [0, 1, 2, 3, 4];
+  @State questionBank: PracticeQuestion[] = [];
+  @State questionIndexes: number[] = [];
   @State currentIndex: number = 0;
-  @State selectedAnswers: number[] = [-1, -1, -1, -1, -1];
-  @State submittedFlags: boolean[] = [false, false, false, false, false];
+  @State selectedAnswers: number[] = [];
+  @State submittedFlags: boolean[] = [];
+  @State topics: string[] = ['综合'];
+  @State knowledgeSources: string[] = [];
+  @State contextLoading: boolean = false;
+  @State contextError: string = '';
+  @State knowledgeCount: number = 0;
+  @State scopeTitle: string = '';
+  private topicMetadata: PracticeTopic[] = [];
+  private active: boolean = false;
+  private requestVersion: number = 0;
+  private scopeCourseId: number = -1;
+  private scopeUserId: number = -1;
+  private scopeSessionId: number = -1;
   @State answeredTotal: number = 0;
   @State correctTotal: number = 0;
   @State generating: boolean = false;
   @State compact: boolean = false;
   @State compactTab: string = 'questions';
+  @State questionViewportHeight: number = 0;
   @State pageReady: boolean = false;
   private introTimer: number = -1;
 
   aboutToAppear(): void {
+    this.active = true;
+    this.scopeCourseId = GlobalState.courseId();
+    this.scopeUserId = GlobalState.userId();
+    this.scopeSessionId = GlobalState.currentSessionId;
+    this.scopeTitle = this.courseName();
+    this.loadContext();
     this.pageReady = true;
   }
 
   aboutToDisappear(): void {
+    this.active = false;
+    this.requestVersion++;
     if (this.introTimer >= 0) {
       clearTimeout(this.introTimer);
       this.introTimer = -1;
@@ -177,6 +118,54 @@ export struct PracticePage {
 
   private currentQuestion(): PracticeQuestion {
     return this.questionBank[this.questionIndexes[this.currentIndex]];
+  }
+
+  private isCurrentRequest(version: number): boolean {
+    return this.active && version === this.requestVersion && GlobalState.courseId() === this.scopeCourseId &&
+      GlobalState.userId() === this.scopeUserId && GlobalState.currentSessionId === this.scopeSessionId;
+  }
+
+  private async loadContext(): Promise<void> {
+    const version = ++this.requestVersion;
+    this.contextLoading = true;
+    this.contextError = '';
+    this.questionBank = [];
+    this.questionIndexes = [];
+    this.selectedAnswers = [];
+    this.submittedFlags = [];
+    this.currentIndex = 0;
+    this.answeredTotal = 0;
+    this.correctTotal = 0;
+    this.selectedTopic = '综合';
+    this.topics = ['综合'];
+    this.topicMetadata = [];
+    this.knowledgeSources = [];
+    this.knowledgeCount = 0;
+    try {
+      const sessionQuery = this.scopeSessionId > 0 ? `&session_id=${this.scopeSessionId}` : '';
+      const data = JSON.parse(await Api.get(`/practice/context?class_course_id=${this.scopeCourseId}${sessionQuery}`)) as PracticeContext;
+      if (!this.isCurrentRequest(version)) { return; }
+      if (data.class_course_id !== this.scopeCourseId || (data.session_id ?? -1) !== this.scopeSessionId) {
+        throw new Error('课程信息不匹配，请重新进入课程');
+      }
+      this.topicMetadata = data.topics;
+      this.topics = ['综合', ...data.topics.map((topic: PracticeTopic) => topic.name).filter((name: string) => name !== '综合')];
+      this.knowledgeSources = data.knowledge_sources;
+      this.knowledgeCount = data.knowledge_count;
+      this.scopeTitle = data.session_title === '' ? data.course_name : `${data.course_name} · ${data.session_title}`;
+    } catch (e) {
+      if (this.isCurrentRequest(version)) { this.contextError = `课程信息加载失败：${(e as Error).message}`; }
+    } finally {
+      if (this.isCurrentRequest(version)) { this.contextLoading = false; }
+    }
+  }
+
+  private statusText(): string {
+    if (this.contextLoading) { return '正在读取当前课程'; }
+    if (this.contextError !== '') { return '课程信息加载失败'; }
+    if (this.generating) { return 'AI 正在组题'; }
+    if (this.questionIndexes.length > 0) { return '题组已就绪'; }
+    return this.knowledgeCount > 0 ? '请选择知识点并生成练习' : '暂无可出题的课程资料';
   }
 
   private blankNumbers(count: number, value: number): number[] {
@@ -195,24 +184,17 @@ export struct PracticePage {
     return result;
   }
 
-  private topicQuestionCount(topic: string): number {
-    let count: number = 0;
-    for (let i = 0; i < this.questionBank.length; i++) {
-      if (this.questionBank[i].topic === topic) {
-        count++;
-      }
-    }
-    return count;
-  }
-
   private async generateQuestions(): Promise<void> {
-    if (this.generating) {
+    if (!this.isCurrentRequest(this.requestVersion) || this.generating || this.contextLoading || this.contextError !== '' || this.knowledgeCount === 0) {
       return;
     }
+    const version = ++this.requestVersion;
+    const selectedTopic = this.selectedTopic;
     this.generating = true;
     const body: GeneratePracticeBody = {
-      class_course_id: GlobalState.courseId(),
-      user_id: GlobalState.userId(),
+      class_course_id: this.scopeCourseId,
+      user_id: this.scopeUserId,
+      session_id: this.scopeSessionId > 0 ? this.scopeSessionId : undefined,
       count: 5,
       mode: this.selectedMode,
       topic: this.selectedTopic,
@@ -222,10 +204,12 @@ export struct PracticePage {
     try {
       const response: PracticeGenerationResponse = JSON.parse(
         await Api.postLong('/practice/generate', body)) as PracticeGenerationResponse;
+      if (!this.isCurrentRequest(version)) { return; }
       if (response.questions.length === 0) {
         throw new Error('后端未返回有效题目');
       }
       this.questionBank = response.questions;
+      this.knowledgeSources = response.knowledge_sources;
       const next: number[] = [];
       for (let i = 0; i < response.questions.length; i++) {
         next.push(i);
@@ -236,11 +220,14 @@ export struct PracticePage {
       this.submittedFlags = this.blankBooleans(next.length);
       this.answeredTotal = 0;
       this.correctTotal = 0;
-      promptAction.showToast({ message: `已生成 ${next.length} 道${this.selectedTopic}练习题` });
+      this.compactTab = 'questions';
+      promptAction.showToast({ message: `已生成 ${next.length} 道${selectedTopic}练习题` });
     } catch (e) {
-      promptAction.showToast({ message: `生成题目失败：${(e as Error).message}`, duration: 3500 });
+      if (this.isCurrentRequest(version)) {
+        promptAction.showToast({ message: `生成题目失败：${(e as Error).message}`, duration: 3500 });
+      }
     } finally {
-      this.generating = false;
+      if (this.isCurrentRequest(version)) { this.generating = false; }
     }
   }
 
@@ -253,7 +240,7 @@ export struct PracticePage {
   }
 
   private chooseAnswer(index: number): void {
-    if (this.currentSubmitted()) {
+    if (this.questionIndexes.length === 0 || this.currentSubmitted()) {
       return;
     }
     const next: number[] = this.selectedAnswers.slice();
@@ -262,7 +249,7 @@ export struct PracticePage {
   }
 
   private submitAnswer(): void {
-    if (this.currentSelectedAnswer() < 0 || this.currentSubmitted()) {
+    if (this.questionIndexes.length === 0 || this.currentSelectedAnswer() < 0 || this.currentSubmitted()) {
       return;
     }
     const correct: boolean = this.currentSelectedAnswer() === this.currentQuestion().answer;
@@ -371,7 +358,7 @@ export struct PracticePage {
         .fontWeight(this.selectedTopic === label ? FontWeight.Bold : FontWeight.Normal)
         .fontColor(this.selectedTopic === label ? AppTheme.INK : AppTheme.TEXT_SECONDARY)
       Blank()
-      Text(label === '综合' ? 'ALL' : `${this.topicQuestionCount(label)}`)
+      Text(label === '综合' ? '全部' : `${this.topicMetadata.find((item: PracticeTopic) => item.name === label)?.source_count ?? 0} 份资料`)
         .fontSize(10)
         .fontColor(AppTheme.TEXT_TERTIARY)
     }
@@ -494,7 +481,7 @@ export struct PracticePage {
             .height(8)
             .borderRadius(4)
             .backgroundColor(this.generating ? PRACTICE_AMBER : AppTheme.SUCCESS)
-          Text(this.generating ? 'AI 正在组题' : '题组已就绪')
+          Text(this.statusText())
             .fontSize(11)
             .fontColor(AppTheme.TEXT_SECONDARY)
         }
@@ -525,7 +512,7 @@ export struct PracticePage {
           .fontSize(24)
           .fontWeight(FontWeight.Bold)
           .fontColor(AppTheme.INK)
-        Text(this.courseName())
+        Text(this.scopeTitle)
           .fontSize(AppTheme.FONT_CAPTION)
           .fontColor(AppTheme.TEXT_TERTIARY)
       }
@@ -553,12 +540,18 @@ export struct PracticePage {
         .fontColor(AppTheme.TEXT_TERTIARY)
         .width('100%')
         .margin({ top: 22, bottom: 8 })
+      Scroll() {
       Column({ space: 2 }) {
-        ForEach(PRACTICE_TOPICS, (topic: string) => {
+        ForEach(this.topics, (topic: string) => {
           this.topicButton(topic)
         }, (topic: string) => topic)
       }
       .width('100%')
+      }.width('100%').height(150).align(Alignment.Top).scrollBar(BarState.Auto)
+      if (this.contextLoading || this.contextError !== '' || this.knowledgeCount === 0) {
+        Text(this.contextError !== '' ? this.contextError : this.statusText())
+          .fontSize(11).fontColor(AppTheme.TEXT_TERTIARY).width('100%').margin({ top: 6 })
+      }
 
       Text('出题要求')
         .fontSize(11)
@@ -595,7 +588,7 @@ export struct PracticePage {
         .height(46)
         .borderRadius(23)
         .backgroundColor(this.generating ? AppTheme.TEXT_TERTIARY : AppTheme.PRIMARY)
-        .enabled(!this.generating)
+        .enabled(!this.generating && !this.contextLoading && this.contextError === '' && this.knowledgeCount > 0)
         .onClick(() => {
           this.generateQuestions();
         })
@@ -677,6 +670,25 @@ export struct PracticePage {
 
   @Builder
   questionPanel() {
+    if (this.questionIndexes.length === 0) {
+      Column({ space: 18 }) {
+        Text(this.scopeTitle).fontSize(20).fontWeight(FontWeight.Bold).fontColor(AppTheme.INK)
+          .textAlign(TextAlign.Center)
+        if (this.contextLoading || this.generating) { LoadingProgress().width(36).height(36) }
+        Text(this.contextError !== '' ? this.contextError : this.statusText())
+          .fontSize(15).fontColor(AppTheme.TEXT_SECONDARY).textAlign(TextAlign.Center)
+        Text(this.knowledgeCount > 0 ? '题目将依据当前课程资料生成，不使用其他课程的示例题。' :
+          '请先由教师发布本课程提纲或补充知识库资料，再开始练习。')
+          .fontSize(13).fontColor(AppTheme.TEXT_TERTIARY).textAlign(TextAlign.Center)
+        if (this.contextError !== '') {
+          Button('重新加载').onClick(() => { this.loadContext(); })
+        } else if (this.knowledgeCount > 0) {
+          Button(this.generating ? '正在生成…' : '生成本课练习').enabled(!this.generating)
+            .onClick(() => { this.generateQuestions(); })
+        }
+      }.width('100%').constraintSize({ minHeight: this.questionViewportHeight })
+        .justifyContent(FlexAlign.Center).padding(28).borderRadius(24).backgroundColor('rgba(255,255,255,0.94)')
+    } else {
     Column() {
       Row({ space: 8 }) {
         Text(this.currentQuestion().type)
@@ -782,11 +794,12 @@ export struct PracticePage {
       .margin({ top: 18 })
     }
     .width('100%')
-    .layoutWeight(0)
+    .constraintSize({ minHeight: this.questionViewportHeight })
     .padding(MobileLayout.studentPhone() ? 14 : { left: 28, right: 28, top: 24, bottom: 22 })
     .borderRadius(24)
     .backgroundColor('rgba(255,255,255,0.94)')
     .border({ width: 1, color: AppTheme.DIVIDER })
+    }
   }
 
   @Builder
@@ -823,7 +836,7 @@ export struct PracticePage {
         .fontColor(AppTheme.INK)
         .width('100%')
       Row() {
-        Text(`${this.currentIndex + 1}`)
+        Text(`${this.questionIndexes.length === 0 ? 0 : this.currentIndex + 1}`)
           .fontSize(30)
           .fontWeight(FontWeight.Bold)
           .fontColor(PRACTICE_BLUE)
@@ -889,17 +902,11 @@ export struct PracticePage {
             .fontSize(10)
             .fontColor(AppTheme.PRIMARY_DEEP)
         }
-        Row({ space: 6 }) {
-          Column().width(10).height(10).borderRadius(5).backgroundColor(AppTheme.PRIMARY)
-          Text('课程提纲').fontSize(11).fontColor(AppTheme.TEXT_SECONDARY)
-        }
-        Row({ space: 6 }) {
-          Column().width(10).height(10).borderRadius(5).backgroundColor(PRACTICE_BLUE)
-          Text('课堂重点').fontSize(11).fontColor(AppTheme.TEXT_SECONDARY)
-        }
-        Row({ space: 6 }) {
-          Column().width(10).height(10).borderRadius(5).backgroundColor(PRACTICE_AMBER)
-          Text('个人错题').fontSize(11).fontColor(AppTheme.TEXT_SECONDARY)
+        ForEach(this.knowledgeSources.slice(0, 4), (source: string) => {
+          Text(source).fontSize(11).fontColor(AppTheme.TEXT_SECONDARY).width('100%').maxLines(2)
+        }, (source: string) => source)
+        if (this.knowledgeSources.length === 0) {
+          Text('暂无课程资料').fontSize(11).fontColor(AppTheme.TEXT_TERTIARY)
         }
       }
       .width('100%')
@@ -911,7 +918,7 @@ export struct PracticePage {
 
       Row({ space: 8 }) {
         Column().width(8).height(8).borderRadius(4).backgroundColor(PRACTICE_CYAN)
-        Text(this.generating ? 'AI 正在组织题目' : '题组已就绪')
+        Text(this.statusText())
           .fontSize(11)
           .fontColor(AppTheme.TEXT_TERTIARY)
       }
@@ -933,7 +940,7 @@ export struct PracticePage {
           if (MobileLayout.studentPhone()) {
             Row() {
               Text('AI 刷题').fontSize(22).fontWeight(FontWeight.Bold).layoutWeight(1)
-              Text(`${this.currentIndex + 1} / ${this.questionIndexes.length}`).fontSize(15).fontColor(PRACTICE_BLUE)
+              Text(`${this.questionIndexes.length === 0 ? 0 : this.currentIndex + 1} / ${this.questionIndexes.length}`).fontSize(15).fontColor(PRACTICE_BLUE)
             }.width('100%').height(36)
             Row({ space: 16 }) {
               Text(`已答 ${this.answeredTotal}`).fontSize(12).fontColor(PRACTICE_BLUE)
@@ -973,7 +980,10 @@ export struct PracticePage {
             else if (this.compactTab === 'difficulty') {
               Scroll() { this.rightPanel() }.width('100%').height('100%').align(Alignment.Top)
             }
-            else { Scroll() { this.questionPanel() }.width('100%').height('100%').align(Alignment.Top) }
+            else {
+              Scroll() { this.questionPanel() }.width('100%').height('100%').align(Alignment.Top)
+                .onAreaChange((oldArea: Area, newArea: Area) => { this.questionViewportHeight = Number(newArea.height); })
+            }
             }
           }.width('100%').layoutWeight(1)
         }.width('100%').height('100%').padding(12)
@@ -984,6 +994,7 @@ export struct PracticePage {
         Column({ space: AppTheme.SPACE_L }) {
           this.practiceHeader()
           Scroll() { this.questionPanel() }.width('100%').layoutWeight(1).align(Alignment.Top).scrollBar(BarState.Auto)
+            .onAreaChange((oldArea: Area, newArea: Area) => { this.questionViewportHeight = Number(newArea.height); })
         }
         .layoutWeight(1)
         .height('100%')

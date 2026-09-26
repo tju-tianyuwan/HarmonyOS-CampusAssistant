@@ -6,6 +6,7 @@ import { common } from '@kit.AbilityKit';
 import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { MobileLayout } from '../common/MobileLayout';
 import { MobileTabs } from '../common/components/MobileTabs';
+import { MarkdownView } from '../common/components/MarkdownView';
 import { CourseSession, Outline, SessionNoteSummary, SessionResource, TranscriptSegment } from '../model/Models';
 import { Api } from '../service/Api';
 import { GlobalState } from '../service/GlobalState';
@@ -40,6 +41,7 @@ export struct ClassPage {
   @State outlineData: Outline | null = null;
   @State outlineText: string = '';
   @State outlineDirty: boolean = false;
+  @State outlineEditing: boolean = false;
   @State resources: SessionResource[] = [];
   @State selectedResource: SessionResource | null = null;
   @State resourceLoading: boolean = false;
@@ -823,6 +825,11 @@ export struct ClassPage {
           .backgroundColor(Color.Transparent).onClick(() => { this.publishDetailOutline('reject'); })
       }
       if (this.canEditOfficialOutline()) {
+        Button(this.outlineEditing ? '预览提纲与公式' : '编辑提纲源码')
+          .height(36).fontColor(AppTheme.PRIMARY).backgroundColor(AppTheme.PRIMARY_LIGHT)
+          .onClick(() => { this.outlineEditing = !this.outlineEditing; })
+      }
+      if (this.canEditOfficialOutline() && this.outlineEditing) {
         TextArea({ text: this.outlineText, placeholder: '校准官方提纲内容' })
           .layoutWeight(1)
           .width('100%')
@@ -871,15 +878,8 @@ export struct ClassPage {
           }).height(36).fontColor(AppTheme.DANGER).backgroundColor(Color.Transparent)
           .enabled(!this.publishingOutline && !this.savingOutline).onClick(() => { this.publishDetailOutline('reject'); })
       } else {
-        Scroll() {
-          Column() {
-            Text(this.outlineData === null ? '暂无提纲。请在录音页面生成。' : this.outlineText)
-              .fontSize(AppTheme.FONT_BODY)
-              .fontColor(this.outlineData === null ? AppTheme.TEXT_TERTIARY : AppTheme.TEXT_PRIMARY)
-              .lineHeight(24)
-          }
-          .width('100%')
-          .alignItems(HorizontalAlign.Start)
+        Column() {
+          MarkdownView({ content: this.outlineData === null ? '暂无提纲，请先生成或等待教师发布。' : this.outlineText })
         }
         .layoutWeight(1)
         .width('100%')
@@ -889,7 +889,6 @@ export struct ClassPage {
         .border({ width: 1.2, color: CLASS_BORDER })
         .shadow({ radius: 22, color: 'rgba(31,62,68,0.10)', offsetX: 0, offsetY: 10 })
         .align(Alignment.Top)
-        .scrollBar(BarState.Auto)
       }
     }
     .layoutWeight(1)

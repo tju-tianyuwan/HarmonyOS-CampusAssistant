@@ -1,4 +1,5 @@
 import { TouchMotion } from '../common/TouchMotion';
+import { MarkdownView } from '../common/components/MarkdownView';
 import { promptAction } from '@kit.ArkUI';
 import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { AppCard } from '../common/components/AppCard';
@@ -18,6 +19,7 @@ export struct ReviewPage {
   @State editText: string = '';
   @State dirty: boolean = false;
   @State busy: boolean = false;
+  @State preview: boolean = true;
 
   aboutToAppear(): void {
     this.load();
@@ -160,6 +162,11 @@ export struct ReviewPage {
           }
           .width('100%')
 
+          Button(this.preview ? '编辑提纲源码' : '预览提纲与公式').height(32)
+            .onClick(() => { this.preview = !this.preview; })
+          if (this.preview) {
+            Column() { MarkdownView({ content: this.editText }) }.width('100%').layoutWeight(1)
+          } else {
           TextArea({ text: this.editText })
             .width('100%')
             .layoutWeight(1)
@@ -170,6 +177,7 @@ export struct ReviewPage {
               this.editText = v;
               this.dirty = true;
             })
+          }
 
           Row({ space: AppTheme.SPACE_M }) {
             Button('保存修改').stateStyles({

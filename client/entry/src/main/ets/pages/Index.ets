@@ -309,6 +309,7 @@ struct Index {
 
   private switchToOverviewPage(): void {
     if (this.recordingActive) { return; }
+    GlobalState.currentSessionId = -1;
     this.homeSessionId = -1;
     this.currentTab = 'overview';
     this.classSubPage = 'list';
@@ -361,6 +362,7 @@ struct Index {
     }
     if (this.recordingActive) { return; }
     if (this.currentTab !== 'overview') {
+      GlobalState.currentSessionId = -1;
       this.currentTab = 'overview';
       this.classSubPage = 'list';
       this.noteSubPage = 'hub';
