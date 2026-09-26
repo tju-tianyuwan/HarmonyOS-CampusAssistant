@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     sis_add_punc: str = "yes"
     sis_digit_norm: str = "yes"
     sis_vocabulary_id: str = ""
+    # Realtime uses a different model/endpoint from short-audio recognition.
+    sis_realtime_property: str = "chinese_16k_general"
+    sis_realtime_endpoint: str = ""
 
     database_url: str = "sqlite:///./smartstudy.db"
     data_dir: str = "./data"

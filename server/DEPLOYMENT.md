@@ -2,7 +2,33 @@
 
 以下命令均在 `E:\code\HarmonyOS-CampusAssistant\server` 目录执行。保留现有 `.env`，不要用示例配置覆盖密钥。升级后需重启原后端进程。
 
-## 单进程与本地识别
+数据库依赖固定为 `sqlmodel==0.0.39`（本地回归验证版本）。当前模型使用不带时区的 UTC 时间；不要改回无上限版本范围。若部署出现 `Datetime values must have timezone information`，按 requirements 重新安装该版本并重启，勿删除数据库或只修改登录接口的一处时间写入。
+
+## 课堂实时语音识别（华为云 SIS）
+
+当前客户端支持 SIS 连续模式：设备缓存音频并发送约 200ms PCM 帧，服务端使用 AK/SK 签名连接 `/v1/{project_id}/rasr/continue-stream`，收到中间结果后立即推送字幕。AK/SK 不下发客户端。
+
+在 `server/.env` 中配置：
+
+```dotenv
+ASR_PROVIDER=huawei_sis_realtime
+SIS_AK=填写有效访问密钥
+SIS_SK=填写对应秘密访问密钥
+SIS_PROJECT_ID=填写所在区域的项目ID
+SIS_REGION=cn-north-4
+SIS_REALTIME_PROPERTY=chinese_16k_general
+SIS_REALTIME_ENDPOINT=
+```
+
+在华为云控制台为相同区域开通**实时语音识别**并授予该 IAM 用户调用权限。模型须以该区域实时识别支持列表为准。`SIS_REALTIME_ENDPOINT` 留空时使用 `wss://sis-ext.<区域>.myhuaweicloud.com`。`SIS_ENDPOINT` 和 `SIS_PROPERTY` 仅用于旧的一句话接口。填写凭据后重启后端，同时安装新版网络客户端。
+
+2026-09-26 用户更新了有效 AK/SK 和项目配置；连续识别连接、START/END 及 7.85 秒中文测试音频已实际通过，收到 17 次中间结果和 1 次最终结果。测试音频中的“二叉树、遍历、子树”存在同音误识别，不能据此认定课堂准确率达标。健康检查 `asr_configured` 只检查必填项是否非空，不代表鉴权或识别已成功。缺少凭据会明确报错，不自动切换本地或模拟识别。
+
+每个连续识别窗口最多 60 秒，窗口内持续返回字幕；暂停/结束会发送 END 并等待最终结果。服务器将整个窗口的最终文本和实际音频时长原子保存后返回确认，设备才清理对应 PCM。丢失确认可按课时和序号重复提交；断线后最多自动重试 3 次，按音频原顺序重放未确认窗口。静音窗口也保留时间戳。重放可能产生重复云端用量，但数据库不会重复保存。60 秒边界会重新建立云端连接，连接期间音频仍缓存；边界处字幕延迟和词句完整性需真机与有效密钥验收。
+
+网络通道：带 Bearer 请求头的 `WS /api/v1/sessions/{id}/realtime/{seq}`。反向代理需支持 WebSocket Upgrade；推荐客户端到服务端使用 HTTPS/WSS。缓存格式按草稿记录，旧分片草稿应在旧模式完成后再切换。录音权限沿用现有教师权限。
+
+## 启动后端与可选本地识别
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
@@ -14,7 +40,7 @@
 
 `.env` 设置 `ASR_PROVIDER=local`、`DOCUMENT_OCR_PROVIDER=local`。Whisper 使用 CPU int8，默认 4 线程；RapidOCR 使用本地 ONNX。健康检查为 `/health`，接口文档为 `/docs`。`asr_configured` 表示配置/模型文件存在，不代表课堂准确率验收。中文语音和图片已经实际识别；短分片可能产生同音词误识别，系统会使用课程名、课时名和已发布提纲标题提供术语提示。
 
-华为 SIS 仍可选择 `ASR_PROVIDER=huawei_sis`，但现有配置请求返回 `401 APIG.0301`，需要校验区域、项目及 AK/SK 权限；当前使用本地识别。不要选择 `mock` 用于真实转写。LLM 和 Embedding 仍需要各自的在线服务配置。
+`ASR_PROVIDER=huawei_sis` 保留旧的一句话接口；课堂实时字幕应使用 `huawei_sis_realtime`。不要选择 `mock` 用于真实转写。LLM 和 Embedding 仍需要各自的在线服务配置。
 
 ## 同机多进程
 

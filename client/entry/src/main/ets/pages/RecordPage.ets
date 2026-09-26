@@ -8,6 +8,7 @@ import { Outline, TranscriptSegment } from '../model/Models';
 import { Api } from '../service/Api';
 import { RecordingStore, RecordingDraft } from '../service/RecordingStore';
 import { closeRecordingCapture } from '../service/RecordingCapture';
+import { RealtimeRecording } from '../service/RealtimeRecording';
 import { GlobalState } from '../service/GlobalState';
 import { CrystalIcon } from '../common/components/CrystalIcon';
 import { StudyMaterial } from '../common/StudyMaterial';
@@ -45,6 +46,13 @@ export struct RecordPage {
   private uploadQueue: PendingChunk[] = [];
   private recordingStore: RecordingStore | null = null;
   private uploadPromise: Promise<void> | null = null;
+  private realtime: boolean = false;
+  private realtimeBytes: number = 0;
+  private realtimeSocket: RealtimeRecording | null = null;
+  private realtimeRetries: number = 0;
+  private realtimeBlocked: boolean = false;
+  private leaving: boolean = false;
+  @State interimText: string = '';
   @State recordState: RecordState = 'idle';
   @State title: string = '';
   @State elapsedSec: number = 0;
@@ -71,6 +79,7 @@ export struct RecordPage {
   private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
+    this.leaving = false;
     try {
       const context = getContext(this) as common.UIAbilityContext;
       this.recordingStore = new RecordingStore(context.filesDir, Api.BASE_URL, GlobalState.userId(), GlobalState.courseId());
@@ -78,6 +87,7 @@ export struct RecordPage {
       if (draft !== null) {
         this.sessionId = draft.sessionId;
         this.title = draft.title;
+        this.realtime = draft.realtime ?? false;
         const pending = this.recordingStore.pending();
         this.seq = Math.max(draft.nextSeq, pending.length > 0 ? pending[pending.length - 1] + 1 : 0);
         this.uploadQueue = pending.map((seq: number): PendingChunk => { return { seq: seq }; });
@@ -108,6 +118,8 @@ export struct RecordPage {
     if (this.recordState === 'recording' || this.recordState === 'paused') {
       try { this.cacheBuffers(); } catch (e) { this.toast((e as Error).message); }
     }
+    this.leaving = true;
+    this.realtimeSocket?.close();
     this.recordingActive = false;
   }
 
@@ -157,6 +169,9 @@ export struct RecordPage {
       creator_id: GlobalState.userId()
     };
     try {
+      interface RecordingConfig { realtime: boolean; }
+      const config = JSON.parse(await Api.get('/sessions/recording-config')) as RecordingConfig;
+      this.realtime = config.realtime;
       interface SessionResp {
         id: number;
       }
@@ -164,7 +179,7 @@ export struct RecordPage {
       const resp: SessionResp = JSON.parse(await Api.post('/sessions', body)) as SessionResp;
       this.sessionId = resp.id;
       if (this.recordingStore === null) { throw new Error('录音缓存不可用'); }
-      const draft: RecordingDraft = { sessionId: this.sessionId, title: this.title, nextSeq: 0 };
+      const draft: RecordingDraft = { sessionId: this.sessionId, title: this.title, nextSeq: 0, realtime: this.realtime };
       this.recordingStore.save(draft);
     } catch (e) {
       this.toast(`创建课时失败：${(e as Error).message}`);
@@ -227,7 +242,7 @@ export struct RecordPage {
     }, 1000);
     this.chunkTimer = setInterval(() => {
       this.flushChunk();
-    }, CHUNK_INTERVAL_MS);
+    }, this.realtime ? 200 : CHUNK_INTERVAL_MS);
     this.startWaveMotion();
   }
 
@@ -290,6 +305,7 @@ export struct RecordPage {
   private cacheBuffers(): void {
     if (this.sessionId < 0) { return; }
     if (this.recordingStore === null) { throw new Error('录音缓存不可用'); }
+    if (this.realtime) { this.cacheRealtimeBuffers(); return; }
     const data = this.mergeBuffers();
     const maxBytes: number = 128000;
     for (let offset = 0; offset < data.byteLength; offset += maxBytes) {
@@ -303,16 +319,92 @@ export struct RecordPage {
   }
 
   private async flushChunk(requireSave: boolean = false): Promise<void> {
-    try { this.cacheBuffers(); }
+    try {
+      this.cacheBuffers();
+      if (this.realtime && requireSave && this.realtimeBytes > 0) {
+        this.seq++;
+        this.realtimeBytes = 0;
+      }
+      if (this.realtime && requireSave) { this.realtimeBlocked = false; this.realtimeRetries = 0; }
+    }
     catch (e) {
       if (requireSave) { throw new Error('录音缓存保存失败，请再次点击结束重试'); }
       this.toast(`录音缓存保存失败：${(e as Error).message}`);
       return;
     }
     if (this.uploadPromise !== null) { return this.uploadPromise; }
-    this.uploadPromise = this.drainUploads();
+    this.uploadPromise = this.realtime ? this.drainRealtime() : this.drainUploads();
     try { await this.uploadPromise; }
     finally { this.uploadPromise = null; }
+  }
+
+  private cacheRealtimeBuffers(): void {
+    if (this.recordingStore === null) { throw new Error('录音缓存不可用'); }
+    const data = this.mergeBuffers();
+    let offset = 0;
+    while (offset < data.byteLength) {
+      const take = Math.min(1920000 - this.realtimeBytes, data.byteLength - offset);
+      try {
+        this.recordingStore.appendRealtime(this.seq, data.slice(offset, offset + take));
+        if (this.realtimeBytes === 0) { this.uploadQueue.push({ seq: this.seq }); }
+        this.realtimeBytes += take;
+        offset += take;
+        if (this.realtimeBytes === 1920000) { this.seq++; this.realtimeBytes = 0; }
+      } catch (e) { this.pendingBuffers.unshift(data.slice(offset)); throw new Error((e as Error).message); }
+    }
+    const draft: RecordingDraft = { sessionId: this.sessionId, title: this.title,
+      nextSeq: this.seq + (this.realtimeBytes > 0 ? 1 : 0), realtime: true };
+    this.recordingStore.save(draft);
+  }
+
+  private async drainRealtime(): Promise<void> {
+    while (this.uploadQueue.length > 0 && !this.leaving && !this.realtimeBlocked) {
+      const chunk = this.uploadQueue[0];
+      const stream = new RealtimeRecording((text: string) => { this.interimText = text; });
+      this.realtimeSocket = stream;
+      try {
+        await stream.open(this.sessionId, chunk.seq);
+        let sent = 0;
+        let committed = stream.committed();
+        while (committed === null && !this.leaving) {
+          if (this.recordingStore === null) { throw new Error('录音缓存不可用'); }
+          const data = this.recordingStore.readFrame(chunk.seq, sent);
+          if (data.byteLength > 0) {
+            await stream.send(data);
+            sent += data.byteLength;
+            // At most twice realtime when replaying cached audio; 200 ms frames when live.
+            await RealtimeRecording.delay(100);
+          } else if (chunk.seq < this.seq) {
+            committed = await stream.finish();
+          } else {
+            stream.committed(); // Detect a connection that failed while waiting for microphone data.
+            await RealtimeRecording.delay(50);
+          }
+        }
+        if (committed === null || this.leaving) { return; }
+        const saved: TranscriptSegment = committed;
+        this.segments = this.segments.filter((segment: TranscriptSegment) => segment.seq !== saved.seq).concat([saved]);
+        this.interimText = '';
+        this.recordingStore?.remove(chunk.seq);
+        this.uploadQueue.shift();
+        this.uploadFailures = 0;
+        this.realtimeRetries = 0;
+      } catch (e) {
+        this.interimText = '';
+        this.uploadFailures = this.uploadQueue.length;
+        if (this.leaving) { return; }
+        if (++this.realtimeRetries > 3 || Api.token === '') {
+          this.realtimeBlocked = true;
+          this.toast(`实时识别失败，录音已保留，暂停或结束可重试：${(e as Error).message}`);
+          return;
+        }
+        stream.close();
+        await RealtimeRecording.delay(1000 * this.realtimeRetries);
+      } finally {
+        stream.close();
+        if (this.realtimeSocket === stream) { this.realtimeSocket = null; }
+      }
+    }
   }
 
   private async drainUploads(): Promise<void> {
@@ -408,6 +500,10 @@ export struct RecordPage {
     this.pendingBuffers = [];
     this.uploadQueue = [];
     this.uploadPromise = null;
+    this.realtimeBytes = 0;
+    this.realtimeBlocked = false;
+    this.realtimeRetries = 0;
+    this.interimText = '';
   }
 
   private async generateOutline(): Promise<void> {
@@ -910,7 +1006,7 @@ export struct RecordPage {
         this.outlinePanel()
       } else {
         List({ space: 12 }) {
-          if (this.segments.length === 0) {
+          if (this.segments.length === 0 && this.interimText === '') {
             ListItem() {
               Column({ space: 12 }) {
                 SymbolGlyph($r('sys.symbol.waveform')).fontSize(32).fontColor([AppTheme.PRIMARY])
@@ -924,6 +1020,15 @@ export struct RecordPage {
             ListItem() { Text(segment.text).width('100%').fontSize(15).lineHeight(25).fontColor(AppTheme.INK)
               .padding(20).borderRadius(20).backgroundColor(AppTheme.BG_CARD) }
           }, (segment: TranscriptSegment) => `${segment.seq}`)
+          if (this.interimText !== '') {
+            ListItem() {
+              Column({ space: 6 }) {
+                Text('正在识别…').fontSize(12).fontColor(AppTheme.PRIMARY)
+                Text(this.interimText).fontSize(15).lineHeight(25).fontColor(AppTheme.INK)
+              }.width('100%').alignItems(HorizontalAlign.Start).padding(20)
+                .borderRadius(20).backgroundColor(AppTheme.BG_CARD)
+            }
+          }
         }.width('100%').layoutWeight(1)
       }
     }.width('100%').height('100%').padding(16).backgroundColor(RECORD_BG)
@@ -1081,7 +1186,7 @@ export struct RecordPage {
         .width('100%')
 
         Column() {
-          if (this.segments.length === 0) {
+          if (this.segments.length === 0 && this.interimText === '') {
             Column({ space: AppTheme.SPACE_M }) {
               CrystalIcon({ icon: $r('sys.symbol.waveform'), edge: 72 })
               Text(this.recordState === 'idle' ?
@@ -1110,6 +1215,15 @@ export struct RecordPage {
                   .alignItems(HorizontalAlign.Start)
                 }
               }, (seg: TranscriptSegment) => `${seg.seq}`)
+              if (this.interimText !== '') {
+                ListItem() {
+                  Column({ space: AppTheme.SPACE_XS }) {
+                    Text('正在识别…').fontSize(AppTheme.FONT_CAPTION).fontColor(AppTheme.PRIMARY)
+                    Text(this.interimText).fontSize(AppTheme.FONT_BODY)
+                      .fontColor(AppTheme.TEXT_PRIMARY).lineHeight(24)
+                  }.width('100%').alignItems(HorizontalAlign.Start)
+                }
+              }
             }
             .width('100%')
             .height('100%')

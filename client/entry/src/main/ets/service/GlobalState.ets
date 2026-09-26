@@ -31,7 +31,7 @@ export class GlobalState {
   static nfcEnabled: boolean = true;
   static lanGrabEnabled: boolean = true;
   static continuationEnabled: boolean = true;
-  // 服务器地址可在设置页修改（写入 Api.BASE_URL）
+  // 接续快照只接受与固定后端地址一致的来源。
 
   static isTeacher(): boolean {
     return GlobalState.user !== null && GlobalState.user.role === 'teacher';

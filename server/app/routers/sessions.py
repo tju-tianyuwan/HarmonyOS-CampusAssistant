@@ -1,16 +1,24 @@
+import asyncio
+import json
+from contextlib import suppress
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.security import HTTPAuthorizationCredentials
+from filelock import Timeout as LockTimeout
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 from starlette.concurrency import run_in_threadpool
 
 from ..db import get_db, write_lock
+from ..config import settings
 from ..models import ClassCourse, CourseSession, Note, Outline, SessionResource, TranscriptSegment, User
 from ..services import rag
 from ..services.asr import ASRError, get_asr_provider
 from ..services.asr.local import LocalASRProvider
+from ..services.asr.huawei_realtime import HuaweiRealtimeStream, RealtimeTranscript
+from ..services.locking import process_lock
 from ..services.llm import chat
 from ..services.documents import extract
 from ..services.security import current_user, is_manager, manager, member, same_user
@@ -48,6 +56,146 @@ class CreateSession(BaseModel):
     class_course_id: int
     title: str = Field(min_length=1, max_length=200)
     creator_id: int
+
+
+@router.get("/recording-config")
+def recording_config(user: User = Depends(current_user)):
+    return {"realtime": settings.asr_provider == "huawei_sis_realtime", "sample_rate": 16000,
+            "channels": 1, "sample_width": 2, "window_ms": 60000, "frame_bytes": 6400}
+
+
+@router.websocket("/{session_id}/realtime/{seq}")
+async def realtime_audio(websocket: WebSocket, session_id: int, seq: int, db: Session = Depends(get_db)):
+    """Continuous audio in, interim text out; commit/ack only after Huawei END.
+
+    A window is at most 60 s and remains on the device until its durable ack.
+    Replaying a committed sequence returns its stored row without calling SIS.
+    """
+    await websocket.accept()
+    lock = None
+    acquired = False
+    try:
+        scheme, _, token = websocket.headers.get("authorization", "").partition(" ")
+        credentials = HTTPAuthorizationCredentials(scheme=scheme, credentials=token) if scheme.lower() == "bearer" and token else None
+        user = current_user(credentials, db)
+        if user.role != "teacher":
+            raise HTTPException(403, "学生不能上传课堂录音")
+        if seq < 0:
+            raise HTTPException(422, "录音序号无效")
+        session = session_access(db, user, session_id, edit=True)
+        lock = process_lock(f"realtime-session-{session_id}")
+        try:
+            lock.acquire(timeout=0)
+            acquired = True
+        except LockTimeout:
+            raise HTTPException(409, "该课时已有实时录音连接，请稍后重试")
+        old = db.exec(select(TranscriptSegment).where(TranscriptSegment.session_id == session_id,
+                                                      TranscriptSegment.seq == seq)).first()
+        if old:
+            await websocket.send_json({"type": "committed", "segment": old.model_dump()})
+            return
+        if session.status == "done":
+            raise HTTPException(409, "课时已结束")
+        if settings.asr_provider != "huawei_sis_realtime":
+            raise HTTPException(409, "服务端未启用华为云实时识别")
+        previous = db.exec(select(TranscriptSegment).where(TranscriptSegment.session_id == session_id)
+                           .order_by(TranscriptSegment.seq.desc())).first()
+        if seq != (previous.seq + 1 if previous else 0):
+            raise HTTPException(409, "请先补传前面的录音，避免丢失课堂内容")
+        start_ms = previous.end_ms if previous else 0
+        db.rollback()  # Never retain a SQLite read transaction across the network wait.
+        transcript = RealtimeTranscript()
+        byte_count = 0
+        stopping = False
+        async with HuaweiRealtimeStream() as cloud:
+            await websocket.send_json({"type": "ready", "seq": seq, "start_ms": start_ms})
+
+            async def upload():
+                nonlocal byte_count, stopping
+                started = asyncio.get_running_loop().time()
+                while True:
+                    message = await asyncio.wait_for(websocket.receive(), 20)
+                    if message["type"] == "websocket.disconnect":
+                        raise WebSocketDisconnect()
+                    audio = message.get("bytes")
+                    if audio is not None:
+                        if not audio or len(audio) % 2 or len(audio) > 6400:
+                            raise ASRError("音频帧须为不超过 6400 字节的 16 位 PCM")
+                        byte_count += len(audio)
+                        if byte_count > 1920000:
+                            raise ASRError("实时录音窗口超过 60 秒，请分段重连")
+                        # Bound replay speed and memory use even for a misbehaving client.
+                        delay = byte_count / 64000 - (asyncio.get_running_loop().time() - started)
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+                        await cloud.send_audio(audio)
+                    else:
+                        raw = message.get("text", "")
+                        if len(raw) > 256 or json.loads(raw).get("type") != "stop" or not byte_count:
+                            raise ASRError("实时录音结束消息无效或音频为空")
+                        stopping = True
+                        await cloud.end()
+                        return
+
+            async def receive():
+                while True:
+                    event = await cloud.receive(timeout=90)
+                    kind = event.get("resp_type")
+                    if kind == "RESULT":
+                        transcript.update(event)
+                        await websocket.send_json({"type": "partial", "seq": seq,
+                                                   "text": transcript.text(interim=True), "start_ms": start_ms})
+                    elif kind == "END":
+                        if not stopping:
+                            raise ASRError("云端提前结束识别，已保留录音供重试")
+                        if transcript.interim:
+                            raise ASRError("云端未确认最后一句识别结果，已保留录音供重试")
+                        return
+
+            sender = asyncio.create_task(upload())
+            receiver = asyncio.create_task(receive())
+            try:
+                done, _ = await asyncio.wait((sender, receiver), return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    task.result()
+                if receiver in done and not sender.done():
+                    raise ASRError("云端提前关闭录音连接，请重试")
+                await sender
+                await asyncio.wait_for(receiver, 25)
+            finally:
+                for task in (sender, receiver):
+                    task.cancel()
+                await asyncio.gather(sender, receiver, return_exceptions=True)
+        with write_lock:
+            db.expire_all()
+            user = current_user(credentials, db)
+            session = session_access(db, user, session_id, edit=True)
+            if session.status == "done":
+                raise HTTPException(409, "课时已结束，录音尚未保存")
+            segment = TranscriptSegment(session_id=session_id, seq=seq, start_ms=start_ms,
+                                        end_ms=start_ms + round(byte_count / 32), text=transcript.text())
+            db.add(segment)
+            session.status = "transcribing"
+            db.add(session)
+            db.commit()
+            db.refresh(segment)
+        await websocket.send_json({"type": "committed", "segment": segment.model_dump()})
+    except WebSocketDisconnect:
+        pass
+    except (HTTPException, ASRError, asyncio.TimeoutError, ValueError, KeyError, TypeError) as exc:
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc) if isinstance(exc, ASRError) else "实时录音连接超时或数据无效，缓存已保留"
+        with suppress(RuntimeError, WebSocketDisconnect):
+            await websocket.send_json({"type": "error", "message": detail,
+                                       "status": exc.status_code if isinstance(exc, HTTPException) else 502})
+    except Exception:
+        # Never forward cloud exception strings (which may contain signed headers).
+        with suppress(RuntimeError, WebSocketDisconnect):
+            await websocket.send_json({"type": "error", "message": "实时识别连接失败，录音缓存已保留，请重试", "status": 502})
+    finally:
+        if acquired:
+            lock.release()
+        with suppress(RuntimeError, WebSocketDisconnect):
+            await websocket.close()
 
 
 @router.get("")

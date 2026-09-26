@@ -235,7 +235,11 @@ struct Index {
     const saved = await SessionStore.load();
     if (Api.token !== initialToken || Api.BASE_URL !== initialServer) { return; }
     if (Api.token === '' && saved !== null) {
-      Api.BASE_URL = saved.server;
+      // Never restore an old development host or send its token to the cloud.
+      if (saved.server !== Api.BASE_URL) {
+        await SessionStore.save(Api.BASE_URL, '').catch(() => {});
+        return;
+      }
       Api.setAccessToken(saved.token);
     }
     if (Api.token === '') { return; }
