@@ -25,7 +25,7 @@ test('teacher floating recording entry spans every course tab and detail', () =>
   for (const tab of ['overview', 'class', 'course_ai', 'ai_meeting', 'materials']) {
     page.currentTab = tab; page.classSubPage = 'list'; page.materialSessionId = 9;
     assert.equal(page.hasTeacherRecordEntry(), true, tab);
-    assert.equal(page.shouldShowRecordEntry(), false, 'no duplicate old entry');
+    assert.equal(page.shouldShowStudentAiEntry(), false, 'no student AI entry for teacher');
   }
 });
 
@@ -46,8 +46,8 @@ test('recording screen, signed-out screens and no active course do not show the 
 test('students retain the existing AI entry and never get the recording FAB', () => {
   const { page, state } = shell(); state.isTeacher = () => false;
   assert.equal(page.hasTeacherRecordEntry(), false);
-  assert.equal(page.shouldShowRecordEntry(), true);
-  page.currentTab = 'course_ai'; assert.equal(page.shouldShowRecordEntry(), false);
+  assert.equal(page.shouldShowStudentAiEntry(), true);
+  page.currentTab = 'course_ai'; assert.equal(page.shouldShowStudentAiEntry(), true);
 });
 
 test('one tap requests immediate recording; repeated tap cannot enqueue another start', () => {

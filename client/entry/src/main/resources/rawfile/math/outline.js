@@ -46,6 +46,20 @@
     {name:'inlineMath',level:'inline',start(src){return src.search(/\$|\\[([]/);},
       tokenizer(src){return mathToken(src,false);},renderer:renderToken}
   ]});
+  root.configureMarkdown=function(embedded,size,color,bold){
+    const body=root.document.body;
+    body.classList.toggle('embedded',!!embedded);
+    body.style.fontSize=Math.max(12,Math.min(28,Number(size)||16))+'px';
+    body.style.color=color;
+    body.style.fontWeight=bold?'600':'400';
+  };
+  function reportSize(){
+    if(!root.document.body.classList.contains('embedded') || !root.markdownSize) return;
+    const height=root.document.getElementById('outline').getBoundingClientRect().height;
+    root.markdownSize.resize(Math.ceil(height),root.innerWidth);
+  }
+  if(root.ResizeObserver) new root.ResizeObserver(reportSize).observe(root.document.getElementById('outline'));
+  if(root.document.fonts) root.document.fonts.ready.then(reportSize);
   root.renderOutline=function(markdown){
     const target=root.document.getElementById('outline');
     slots.length=0;
@@ -67,10 +81,11 @@
           node.title='此公式暂不支持，已保留原文';
         }
       });
-      root.scrollTo(0,0);
+      reportSize();
       return true;
     } catch(error) {
       target.textContent=text;
+      reportSize();
       return false;
     }
   };

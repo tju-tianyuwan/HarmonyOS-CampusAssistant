@@ -1,4 +1,5 @@
 import { TouchMotion } from '../common/TouchMotion';
+import { MarkdownView } from '../common/components/MarkdownView';
 import { MotionPage } from '../common/components/MotionPage';
 import { promptAction } from '@kit.ArkUI';
 import { LearningTheme as AppTheme } from '../common/LearningTheme';
@@ -62,6 +63,15 @@ export struct CourseAiPage {
   @State compactTab: string = 'chat';
   @State analytics: ClassroomAnalytics | null = null;
   @State analyticsLoading: boolean = false;
+  @State analyticsError: string = '';
+  @State totalQuestionValue: string = '—';
+  @State missedQuestionValue: string = '—';
+  @State missedRatioValue: string = '—';
+  @State topQuestionValue: string = '—';
+  @State topMissedValue: string = '—';
+  @State topMissedRatioValue: string = '—';
+  private analyticsActive: boolean = false;
+  private analyticsGeneration: number = 0;
   @State pageReady: boolean = false;
   @State pulse: boolean = false;
   private msgScroller: Scroller = new Scroller();
@@ -81,6 +91,7 @@ export struct CourseAiPage {
   }
 
   aboutToAppear(): void {
+    this.analyticsActive = true;
     this.compactTab = GlobalState.isTeacher() ? 'insights' : 'chat';
     this.loadChatSessions();
     this.pageReady = true;
@@ -95,6 +106,9 @@ export struct CourseAiPage {
   }
 
   aboutToDisappear(): void {
+    this.analyticsActive = false;
+    this.analyticsGeneration++;
+    this.analyticsLoading = false;
     this.stopAnswer();
     if (this.cancelStream !== null) { this.cancelStream(); this.cancelStream = null; }
     if (this.introTimer >= 0) {
@@ -158,12 +172,12 @@ export struct CourseAiPage {
       return '我';
     }
     const agent: AiAgentInfo | null = this.agentForRole(role);
-    return agent === null ? '课程 AI' : agent.name;
+    return agent === null ? (GlobalState.isTeacher() ? 'AI' : '课程 AI') : agent.name;
   }
 
   private speakerTitle(role: string): string {
     const agent: AiAgentInfo | null = this.agentForRole(role);
-    return agent === null ? '课程助手' : agent.title;
+    return agent === null ? (GlobalState.isTeacher() ? '通用模型' : '课程助手') : agent.title;
   }
 
   private speakerColor(role: string): string {
@@ -180,20 +194,41 @@ export struct CourseAiPage {
   }
 
   private async loadAnalytics(): Promise<void> {
-    if (!GlobalState.isTeacher() || GlobalState.courseId() < 0 || this.analyticsLoading) {
+    if (!this.analyticsActive || !GlobalState.isTeacher() || GlobalState.courseId() < 0 || this.analyticsLoading) {
       return;
     }
+    const courseId = GlobalState.courseId();
+    const userId = GlobalState.userId();
+    const generation = ++this.analyticsGeneration;
     this.analyticsLoading = true;
     try {
       const raw: string = await Api.get(
-        `/analytics/classroom?class_course_id=${GlobalState.courseId()}&user_id=${GlobalState.userId()}&limit=8`);
-      this.analytics = JSON.parse(raw) as ClassroomAnalytics;
-    } catch (e) {
-      if (this.analytics === null) {
-        this.toast(`加载课堂洞察失败：${(e as Error).message}`);
+        `/analytics/classroom?class_course_id=${courseId}&user_id=${userId}&limit=8`);
+      if (!this.analyticsActive || generation !== this.analyticsGeneration ||
+        courseId !== GlobalState.courseId() || userId !== GlobalState.userId()) { return; }
+      const result = JSON.parse(raw) as ClassroomAnalytics;
+      if (result.class_course_id !== courseId || !Number.isFinite(result.total_questions) ||
+        !Number.isFinite(result.missed_count) || !Array.isArray(result.top_keywords) || !Array.isArray(result.hot_zones)) {
+        throw new Error('课堂统计返回异常，请重试');
       }
+      this.analytics = result;
+      this.analyticsError = '';
+      this.totalQuestionValue = `${result.total_questions}`;
+      this.missedQuestionValue = `${result.missed_count}`;
+      this.missedRatioValue = result.total_questions > 0 ? `${Math.round(result.missed_count * 100 / result.total_questions)}%` : '0%';
+      const top = result.top_keywords.length > 0 ? result.top_keywords[0] : null;
+      this.topQuestionValue = top === null ? '0' : `${top.count}`;
+      this.topMissedValue = top === null ? '0' : `${top.missed_count}`;
+      this.topMissedRatioValue = top === null || top.count <= 0 ? '0%' : `${Math.round(top.missed_count * 100 / top.count)}%`;
+    } catch (e) {
+      if (!this.analyticsActive || generation !== this.analyticsGeneration ||
+        courseId !== GlobalState.courseId() || userId !== GlobalState.userId()) { return; }
+      this.analyticsError = `课堂统计加载失败：${(e as Error).message}`;
+      this.analytics = null;
+      this.totalQuestionValue = '—'; this.missedQuestionValue = '—'; this.missedRatioValue = '—';
+      this.topQuestionValue = '—'; this.topMissedValue = '—'; this.topMissedRatioValue = '—';
     } finally {
-      this.analyticsLoading = false;
+      if (generation === this.analyticsGeneration) { this.analyticsLoading = false; }
     }
   }
 
@@ -208,13 +243,6 @@ export struct CourseAiPage {
   private topInsight(): KeywordInsight | null {
     const items: KeywordInsight[] = this.topKeywords();
     return items.length === 0 ? null : items[0];
-  }
-
-  private missedRatio(): string {
-    if (this.analytics === null || this.analytics.total_questions <= 0) {
-      return '0%';
-    }
-    return `${Math.round(this.analytics.missed_count * 100 / this.analytics.total_questions)}%`;
   }
 
   private updatedAtText(): string {
@@ -246,25 +274,7 @@ export struct CourseAiPage {
 
   private topKeywordText(): string {
     const top: KeywordInsight | null = this.topInsight();
-    return top === null ? '暂无热词' : top.keyword;
-  }
-
-  private topKeywordCountText(): string {
-    const top: KeywordInsight | null = this.topInsight();
-    return top === null ? '0' : `${top.count}`;
-  }
-
-  private topKeywordMissedText(): string {
-    const top: KeywordInsight | null = this.topInsight();
-    return top === null ? '0' : `${top.missed_count}`;
-  }
-
-  private totalQuestionsText(): string {
-    return this.analytics === null ? '0' : `${this.analytics.total_questions}`;
-  }
-
-  private missedCountText(): string {
-    return this.analytics === null ? '0' : `${this.analytics.missed_count}`;
+    return top === null ? (this.analytics === null ? '等待统计数据' : '暂无热词') : top.keyword;
   }
 
   private async loadChatSessions(): Promise<void> {
@@ -368,6 +378,8 @@ export struct CourseAiPage {
   }
 
   private buildMemory(): string {
+    // General teacher chat uses server-owned conversation history, without course instructions.
+    if (GlobalState.isTeacher()) { return ''; }
     if (this.messages.length === 0) {
       return '';
     }
@@ -531,7 +543,7 @@ export struct CourseAiPage {
         this.replaceLastMessage(next);
         this.asking = false;
       }
-    }, 'single');
+    }, GlobalState.isTeacher() ? 'general' : 'single');
   }
 
   @Builder
@@ -575,7 +587,7 @@ export struct CourseAiPage {
               .padding({ left: 12, right: 12, top: 5, bottom: 5 })
               .borderRadius(999)
               .backgroundColor(AI_CYAN)
-            Text('仅依据本课程知识库')
+            Text(GlobalState.isTeacher() ? '通用 AI 问答' : '仅依据本课程知识库')
               .fontSize(11)
               .fontColor('rgba(18,24,24,0.58)')
               .padding({ left: 12, right: 12, top: 5, bottom: 5 })
@@ -586,7 +598,8 @@ export struct CourseAiPage {
             .fontSize(48)
             .fontWeight(FontWeight.Bold)
             .fontColor(AppTheme.INK)
-          Text('上传课程问题，由单一 AI 助手结合课堂提纲、共享笔记和课程知识库回答。')
+          Text(GlobalState.isTeacher() ? '直接向通用模型提问，不限定课程知识库。' :
+            '上传课程问题，由单一 AI 助手结合课堂提纲、共享笔记和课程知识库回答。')
             .fontSize(AppTheme.FONT_BODY)
             .fontColor('rgba(18,24,24,0.56)')
             .maxLines(1)
@@ -823,16 +836,16 @@ export struct CourseAiPage {
   }
 
   @Builder
-  insightMetric(label: string, value: string, sub: string, color: string) {
+  insightMetric(label: string, metric: string, color: string) {
     Column({ space: 4 }) {
-      Text(value)
+      Text(metric === 'total' ? this.totalQuestionValue : this.missedQuestionValue)
         .fontSize(30)
         .fontWeight(FontWeight.Bold)
         .fontColor(AppTheme.INK)
       Text(label)
         .fontSize(AppTheme.FONT_CAPTION)
         .fontColor(AppTheme.TEXT_SECONDARY)
-      Text(sub)
+      Text(metric === 'total' ? '课程 AI 问答' : this.missedRatioValue)
         .fontSize(10)
         .fontColor(color)
     }
@@ -873,9 +886,9 @@ export struct CourseAiPage {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         Row({ space: AppTheme.SPACE_M }) {
-          this.spotlightNumber('提问', this.topKeywordCountText(), AppTheme.PRIMARY)
-          this.spotlightNumber('未命中', this.topKeywordMissedText(), AI_AMBER)
-          this.spotlightNumber('占比', this.missedRatio(), AI_CYAN)
+          this.spotlightNumber('提问', 'topCount', AppTheme.PRIMARY)
+          this.spotlightNumber('未命中', 'topMissed', AI_AMBER)
+          this.spotlightNumber('未命中率', 'topRatio', AI_CYAN)
         }
       }
       .width('100%')
@@ -892,9 +905,9 @@ export struct CourseAiPage {
   }
 
   @Builder
-  spotlightNumber(label: string, value: string, color: string) {
+  spotlightNumber(label: string, metric: string, color: string) {
     Column({ space: 5 }) {
-      Text(value)
+      Text(metric === 'topCount' ? this.topQuestionValue : metric === 'topMissed' ? this.topMissedValue : this.topMissedRatioValue)
         .fontSize(28)
         .fontWeight(FontWeight.Bold)
         .fontColor(AppTheme.PRIMARY)
@@ -1055,11 +1068,17 @@ export struct CourseAiPage {
       .width('100%')
 
       Row({ space: AppTheme.SPACE_S }) {
-        this.insightMetric('累计学生提问', this.totalQuestionsText(), 'Question Log', AppTheme.PRIMARY)
-        this.insightMetric('知识库未命中', this.missedCountText(), this.missedRatio(), AI_AMBER)
+        this.insightMetric('累计学生提问', 'total', AppTheme.PRIMARY)
+        this.insightMetric('知识库未命中', 'missed', AI_AMBER)
       }
       .width('100%')
 
+      if (this.analyticsError !== '') {
+        Row({ space: 8 }) {
+          Text(this.analyticsError).fontSize(12).fontColor(AppTheme.DANGER).layoutWeight(1)
+          Button('重试').fontSize(12).enabled(!this.analyticsLoading).onClick(() => { this.loadAnalytics(); })
+        }.width('100%')
+      }
       if (!this.compact) { this.teacherSpotlightPanel() }
 
       Scroll() {
@@ -1071,7 +1090,7 @@ export struct CourseAiPage {
               .fontColor(AppTheme.INK)
               .width('100%')
             if (this.topKeywords().length === 0) {
-              Text('学生开始提问后，这里会出现热词排行')
+              Text(this.analytics === null ? '等待加载课堂统计' : '学生开始提问后，这里会出现热词排行')
                 .fontSize(AppTheme.FONT_CAPTION)
                 .fontColor(AppTheme.TEXT_TERTIARY)
                 .width('100%')
@@ -1093,7 +1112,7 @@ export struct CourseAiPage {
               .fontColor(AppTheme.INK)
               .width('100%')
             if (this.hotZones().length === 0) {
-              Text('暂无热区')
+              Text(this.analytics === null ? '等待加载课堂统计' : '暂无热区')
                 .fontSize(AppTheme.FONT_CAPTION)
                 .fontColor(AppTheme.TEXT_TERTIARY)
             } else {
@@ -1130,12 +1149,12 @@ export struct CourseAiPage {
   }
 
   @Builder
-  messageBubble(m: UiChatMessage) {
+  messageBubble(index: number) {
     Row({ space: 10 }) {
-      if (m.role === 'user') {
+      if (this.messages[index].role === 'user') {
         Blank()
       } else {
-        Text(this.speakerAvatar(m.role))
+        Text(this.speakerAvatar(this.messages[index].role))
           .fontSize(AppTheme.FONT_BODY)
           .fontWeight(FontWeight.Bold)
           .fontColor('#FFFFFF')
@@ -1143,27 +1162,27 @@ export struct CourseAiPage {
           .height(38)
           .textAlign(TextAlign.Center)
           .borderRadius(19)
-          .backgroundColor(this.speakerColor(m.role))
-          .shadow({ radius: 12, color: this.speakerColor(m.role), offsetX: 0, offsetY: 5 })
+          .backgroundColor(this.speakerColor(this.messages[index].role))
+          .shadow({ radius: 12, color: this.speakerColor(this.messages[index].role), offsetX: 0, offsetY: 5 })
       }
       Column({ space: AppTheme.SPACE_XS }) {
         Row({ space: 6 }) {
-          Text(this.speakerName(m.role))
+          Text(this.speakerName(this.messages[index].role))
             .fontSize(AppTheme.FONT_CAPTION)
             .fontWeight(FontWeight.Medium)
-            .fontColor(m.role === 'user' ? '#FFFFFF' : this.speakerColor(m.role))
-          if (m.role !== 'user') {
-            Text(this.speakerTitle(m.role))
+            .fontColor(this.messages[index].role === 'user' ? '#FFFFFF' : this.speakerColor(this.messages[index].role))
+          if (this.messages[index].role !== 'user') {
+            Text(this.speakerTitle(this.messages[index].role))
               .fontSize(10)
               .fontColor(AppTheme.TEXT_TERTIARY)
           }
-          if (m.streaming) {
+          if (this.messages[index].streaming) {
             Text('生成中')
               .fontSize(10)
               .fontColor(AI_VIOLET)
           }
         }
-        if (m.warning !== '') {
+        if (this.messages[index].warning !== '') {
           Row({ space: 10 }) {
             Text('!')
               .fontSize(13)
@@ -1179,7 +1198,7 @@ export struct CourseAiPage {
                 .fontSize(AppTheme.FONT_CAPTION)
                 .fontWeight(FontWeight.Bold)
                 .fontColor('#8A5200')
-              Text(m.warning)
+              Text(this.messages[index].warning)
                 .fontSize(AppTheme.FONT_CAPTION)
                 .fontColor('#9A640F')
                 .lineHeight(18)
@@ -1193,33 +1212,34 @@ export struct CourseAiPage {
           .backgroundColor('#FFF7E6')
           .border({ width: 1, color: '#F3CF85' })
         }
-        Text(m.content + (m.streaming ? ' ▌' : ''))
-          .fontSize(AppTheme.FONT_BODY)
-          .fontColor(m.role === 'user' ? '#FFFFFF' : AppTheme.TEXT_PRIMARY)
-          .lineHeight(23)
-        if (m.sources.length > 0) {
-          Text(`来源：${m.sources.join('；')}`)
+        if (this.messages[index].role === 'user') {
+          Text(this.messages[index].content).fontSize(AppTheme.FONT_BODY).fontColor('#FFFFFF').lineHeight(23)
+        } else {
+          MarkdownView({ content: this.messages[index].content + (this.messages[index].streaming ? ' ▌' : ''), autoHeight: true })
+        }
+        if (this.messages[index].sources.length > 0) {
+          Text(`来源：${this.messages[index].sources.join('；')}`)
             .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(m.role === 'user' ? 'rgba(255,255,255,0.72)' : AppTheme.TEXT_TERTIARY)
+            .fontColor(this.messages[index].role === 'user' ? 'rgba(255,255,255,0.72)' : AppTheme.TEXT_TERTIARY)
             .lineHeight(18)
         }
       }
-      .width(m.role === 'user' ? '72%' : '82%')
+      .width(this.messages[index].role === 'user' ? '72%' : '82%')
       .padding(AppTheme.SPACE_M)
       .borderRadius(22)
-      .backgroundColor(m.role === 'user' ? (GlobalState.isTeacher() ? AI_BLUE : AppTheme.PRIMARY) : AI_GLASS)
+      .backgroundColor(this.messages[index].role === 'user' ? (GlobalState.isTeacher() ? AI_BLUE : AppTheme.PRIMARY) : AI_GLASS)
       .border({
         width: 1.1,
-        color: m.role === 'user' ? 'rgba(255,255,255,0.26)' : this.speakerColor(m.role)
+        color: this.messages[index].role === 'user' ? 'rgba(255,255,255,0.26)' : this.speakerColor(this.messages[index].role)
       })
       .shadow({
-        radius: m.role === 'user' ? 18 : 22,
-        color: m.role === 'user' ? 'rgba(63,125,255,0.18)' : 'rgba(31,62,68,0.10)',
+        radius: this.messages[index].role === 'user' ? 18 : 22,
+        color: this.messages[index].role === 'user' ? 'rgba(63,125,255,0.18)' : 'rgba(31,62,68,0.10)',
         offsetX: 0,
         offsetY: 8
       })
       .alignItems(HorizontalAlign.Start)
-      if (m.role !== 'user') {
+      if (this.messages[index].role !== 'user') {
         Blank()
       }
     }
@@ -1238,12 +1258,13 @@ export struct CourseAiPage {
       .height(190)
       .scale({ x: 0.82, y: 0.82 })
       }
-      Text('开始课程问答')
+      Text(GlobalState.isTeacher() ? '开始 AI 问答' : '开始课程问答')
         .fontSize(this.compact ? 18 : 24)
         .fontWeight(FontWeight.Bold)
         .fontColor(AppTheme.INK)
       if (!this.compact) {
-        Text('输入课程问题，AI 将结合课程知识库给出回答，并标注引用来源。')
+        Text(GlobalState.isTeacher() ? '可以讨论备课、教学或其他问题，不限定课程知识库。' :
+          '输入课程问题，AI 将结合课程知识库给出回答，并标注引用来源。')
         .fontSize(AppTheme.FONT_BODY)
         .fontColor(AppTheme.TEXT_SECONDARY)
         .textAlign(TextAlign.Center)
@@ -1269,7 +1290,7 @@ export struct CourseAiPage {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           if (!this.compact) {
-            Text('单一 AI 助手，仅依据本课程知识库回答')
+            Text(GlobalState.isTeacher() ? '通用模型 · 不限定课程知识库' : '单一 AI 助手，仅依据本课程知识库回答')
               .fontSize(AppTheme.FONT_CAPTION)
               .fontColor(AppTheme.TEXT_TERTIARY)
           }
@@ -1285,17 +1306,15 @@ export struct CourseAiPage {
       }
       .width('100%')
 
-      if (GlobalState.isTeacher()) { this.agentRoster() }
-
       if (this.messages.length === 0) {
         this.emptyChatState()
       } else {
         List({ space: AppTheme.SPACE_M, scroller: this.msgScroller }) {
           ForEach(this.messages, (m: UiChatMessage, index: number) => {
             ListItem() {
-              this.messageBubble(m)
+              this.messageBubble(index)
             }
-          }, (m: UiChatMessage, index: number) => `${index}_${m.role}_${m.content.length}_${m.streaming}`)
+          }, (m: UiChatMessage, index: number) => `${index}_${m.role}`)
         }
         .layoutWeight(1)
         .width('100%')
@@ -1303,7 +1322,7 @@ export struct CourseAiPage {
       }
 
       Row({ space: AppTheme.SPACE_S }) {
-        TextInput({ text: this.inputText, placeholder: '输入你的课程问题…' })
+        TextInput({ text: this.inputText, placeholder: GlobalState.isTeacher() ? '输入你想讨论的问题…' : '输入你的课程问题…' })
           .layoutWeight(1)
           .fontSize(AppTheme.FONT_BODY)
           .height(46)
@@ -1386,23 +1405,23 @@ export struct CourseAiPage {
   }
 
   @Builder
-  compactMessageBubble(m: UiChatMessage) {
+  compactMessageBubble(index: number) {
     Column({ space: 5 }) {
       Row() {
-        Text(m.role === 'user' ? '老师' : 'AI')
+        Text(this.messages[index].role === 'user' ? '老师' : 'AI')
           .fontSize(10)
           .fontWeight(FontWeight.Medium)
-          .fontColor(m.role === 'user' ? AI_BLUE : AppTheme.PRIMARY)
+          .fontColor(this.messages[index].role === 'user' ? AI_BLUE : AppTheme.PRIMARY)
         Blank()
-        if (m.streaming) {
+        if (this.messages[index].streaming) {
           Text('生成中')
             .fontSize(10)
             .fontColor(AI_VIOLET)
         }
       }
       .width('100%')
-      if (m.warning !== '') {
-        Text(`!  ${m.warning}`)
+      if (this.messages[index].warning !== '') {
+        Text(`!  ${this.messages[index].warning}`)
           .fontSize(10)
           .fontColor('#8A5200')
           .lineHeight(16)
@@ -1411,14 +1430,13 @@ export struct CourseAiPage {
           .backgroundColor('#FFF7E6')
           .border({ width: 1, color: '#F3CF85' })
       }
-      Text(m.content + (m.streaming ? ' ▌' : ''))
-        .fontSize(AppTheme.FONT_CAPTION)
-        .fontColor(AppTheme.TEXT_PRIMARY)
-        .lineHeight(18)
-        .maxLines(5)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-      if (m.sources.length > 0) {
-        Text(`来源：${m.sources.join('；')}`)
+      if (this.messages[index].role === 'user') {
+        Text(this.messages[index].content).fontSize(AppTheme.FONT_CAPTION).fontColor(AppTheme.TEXT_PRIMARY).lineHeight(18)
+      } else {
+        MarkdownView({ content: this.messages[index].content + (this.messages[index].streaming ? ' ▌' : ''), autoHeight: true, textSize: 14 })
+      }
+      if (this.messages[index].sources.length > 0) {
+        Text(`来源：${this.messages[index].sources.join('；')}`)
           .fontSize(10)
           .fontColor(AppTheme.TEXT_TERTIARY)
           .maxLines(2)
@@ -1428,8 +1446,8 @@ export struct CourseAiPage {
     .width('100%')
     .padding({ left: 12, right: 12, top: 10, bottom: 10 })
     .borderRadius(18)
-    .backgroundColor(m.role === 'user' ? 'rgba(63,125,255,0.10)' : 'rgba(255,255,255,0.76)')
-    .border({ width: 1, color: m.role === 'user' ? 'rgba(63,125,255,0.18)' : AI_BORDER })
+    .backgroundColor(this.messages[index].role === 'user' ? 'rgba(63,125,255,0.10)' : 'rgba(255,255,255,0.76)')
+    .border({ width: 1, color: this.messages[index].role === 'user' ? 'rgba(63,125,255,0.18)' : AI_BORDER })
   }
 
   @Builder
@@ -1437,11 +1455,11 @@ export struct CourseAiPage {
     Column({ space: AppTheme.SPACE_M }) {
       Row() {
         Column({ space: 3 }) {
-          Text('AI 追问')
+          Text('AI 问答')
             .fontSize(AppTheme.FONT_BODY)
             .fontWeight(FontWeight.Bold)
             .fontColor(AppTheme.INK)
-          Text('辅助解释课堂热区')
+          Text('通用模型 · 不限课程资料')
             .fontSize(AppTheme.FONT_CAPTION)
             .fontColor(AppTheme.TEXT_TERTIARY)
         }
@@ -1495,7 +1513,7 @@ export struct CourseAiPage {
       Column({ space: AppTheme.SPACE_S }) {
         Row() {
           Text(this.selectedChatIndex >= 0 && this.selectedChatIndex < this.chatSessions.length ?
-            this.chatSessions[this.selectedChatIndex].title : '临时追问')
+            this.chatSessions[this.selectedChatIndex].title : '新对话')
             .fontSize(AppTheme.FONT_CAPTION)
             .fontWeight(FontWeight.Medium)
             .fontColor(AppTheme.INK)
@@ -1510,11 +1528,11 @@ export struct CourseAiPage {
 
         if (this.messages.length === 0) {
           Column({ space: 8 }) {
-            Text('可以追问热词成因')
+            Text('有什么想讨论的问题？')
               .fontSize(AppTheme.FONT_BODY)
               .fontWeight(FontWeight.Medium)
               .fontColor(AppTheme.INK)
-            Text('例如：为什么学生都在问中序遍历？')
+            Text('备课、教学或其他问题，都可以直接提问。')
               .fontSize(AppTheme.FONT_CAPTION)
               .fontColor(AppTheme.TEXT_TERTIARY)
               .textAlign(TextAlign.Center)
@@ -1527,9 +1545,9 @@ export struct CourseAiPage {
           List({ space: AppTheme.SPACE_S, scroller: this.msgScroller }) {
             ForEach(this.messages, (m: UiChatMessage, index: number) => {
               ListItem() {
-                this.compactMessageBubble(m)
+                this.compactMessageBubble(index)
               }
-            }, (m: UiChatMessage, index: number) => `${index}_${m.role}_${m.content.length}_${m.streaming}_compact`)
+            }, (m: UiChatMessage, index: number) => `${index}_${m.role}_compact`)
           }
           .layoutWeight(1)
           .width('100%')
@@ -1544,7 +1562,7 @@ export struct CourseAiPage {
       .border({ width: 1, color: AI_BORDER })
 
       Row({ space: AppTheme.SPACE_S }) {
-        TextInput({ text: this.inputText, placeholder: '向 AI 追问…' })
+        TextInput({ text: this.inputText, placeholder: '向 AI 提问…' })
           .layoutWeight(1)
           .fontSize(AppTheme.FONT_CAPTION)
           .height(42)

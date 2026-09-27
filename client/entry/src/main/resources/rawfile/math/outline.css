@@ -5,6 +5,10 @@ body { padding: 16px 18px 24px; font-size:16px; line-height:1.75; overflow-wrap:
 h1,h2,h3,h4 { line-height:1.4; color:#163d58; margin:1.15em 0 .55em; }
 h1 { font-size:1.5em; } h2 { font-size:1.28em; } h3 { font-size:1.12em; }
 main>:first-child { margin-top:0; }
+main { display:flow-root; }
+body.embedded { padding:0; }
+body.embedded main>:last-child { margin-bottom:0; }
+body.embedded h1,body.embedded h2,body.embedded h3,body.embedded h4 { color:inherit; }
 p { margin:.65em 0; } ul,ol { padding-left:1.5em; }
 blockquote { margin:.8em 0; padding:.3em 1em; border-left:3px solid #93c2df; background:#edf5fa; }
 pre { padding:12px; background:#edf3f8; border-radius:10px; overflow-x:auto; white-space:pre; }

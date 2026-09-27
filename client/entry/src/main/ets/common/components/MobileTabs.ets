@@ -18,6 +18,7 @@ export struct MobileTabs {
       Column().width(this.keys.length > 0 ? this.tabWidth / this.keys.length : 0).height(40)
         .borderRadius(this.solid ? 16 : 10)
         .backgroundColor(this.solid ? AppTheme.PRIMARY : '#FFFFFF')
+        .opacity(this.keys.includes(this.selected) ? 1 : 0)
         .translate({ x: Math.max(0, this.keys.indexOf(this.selected)) * this.tabWidth / Math.max(1, this.keys.length) })
         .animation({ duration: this.reduceMotion ? 0 : 220, curve: TouchMotion.standard() })
         .hitTestBehavior(HitTestMode.None)

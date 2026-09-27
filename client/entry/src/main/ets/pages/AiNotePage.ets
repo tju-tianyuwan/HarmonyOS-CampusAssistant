@@ -1,4 +1,5 @@
 import { TouchMotion } from '../common/TouchMotion';
+import { MarkdownView } from '../common/components/MarkdownView';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { LearningTheme as AppTheme } from '../common/LearningTheme';
@@ -36,10 +37,13 @@ export struct AiNotePage {
   @State selectedNoteIndex: number = -1;
   // 编辑器
   @State editorText: string = '';
+  @State noteBodyMode: string = 'preview';
   @State noteTitle: string = '';
   @State selStart: number = 0;
   @State selEnd: number = 0;
   @State dirty: boolean = false;
+  @State saving: boolean = false;
+  @State sharing: boolean = false;
   // AI 面板
   @State aiOpen: boolean = true;
   @State compact: boolean = false;
@@ -135,12 +139,16 @@ export struct AiNotePage {
   }
 
   private selectNote(index: number): void {
+    if (this.saving || this.sharing) { return; }
     this.selectedNoteIndex = index;
     const n: Note | null = this.currentNote();
     if (n !== null) {
       this.editorText = n.content;
       this.noteTitle = n.title;
       this.dirty = false;
+      this.noteBodyMode = this.canEditCurrent() && n.content.trim() === '' ? 'edit' : 'preview';
+      this.selStart = 0;
+      this.selEnd = 0;
     }
   }
 
@@ -154,7 +162,15 @@ export struct AiNotePage {
     return false;
   }
 
+  private setNoteBodyMode(mode: string): void {
+    if (mode !== 'preview' && mode !== 'edit') { return; }
+    if (mode === 'edit' && !this.canEditCurrent()) { return; }
+    this.noteBodyMode = mode;
+    if (mode === 'preview') { this.selStart = 0; this.selEnd = 0; }
+  }
+
   private async createNote(): Promise<void> {
+    if (this.saving || this.sharing) { return; }
     interface NoteBody {
       class_course_id: number;
       session_id: number | null;
@@ -185,11 +201,12 @@ export struct AiNotePage {
     }
   }
 
-  private async persistNote(successText: string): Promise<void> {
+  private async persistNote(successText: string): Promise<boolean> {
+    if (this.saving) { return false; }
     const n: Note | null = this.currentNote();
     if (n === null || !this.canEditCurrent()) {
       this.toast('当前笔记为只读');
-      return;
+      return false;
     }
     interface UpdateBody {
       title: string;
@@ -197,22 +214,52 @@ export struct AiNotePage {
     }
 
     const body: UpdateBody = { title: this.noteTitle, content: this.editorText };
+    this.saving = true;
     try {
-      await Api.put(`/notes/${n.id}`, body);
-      n.content = this.editorText;
-      n.title = this.noteTitle;
-      this.dirty = false;
+      const updated: Note = JSON.parse(await Api.put(`/notes/${n.id}`, body)) as Note;
+      this.myNotes = this.myNotes.map((item: Note): Note => item.id === n.id ? updated : item);
+      this.dirty = this.editorText !== body.content || this.noteTitle !== body.title;
       this.toast(successText);
+      return true;
     } catch (e) {
       this.toast(`保存失败：${(e as Error).message}`);
+      return false;
+    } finally {
+      this.saving = false;
     }
   }
 
+  private async toggleShare(): Promise<void> {
+    if (this.sharing || this.saving) { return; }
+    const note: Note | null = this.currentNote();
+    if (note === null || !this.canEditCurrent()) { this.toast('当前笔记为只读'); return; }
+    const publish: boolean = note.visibility !== 'shared';
+    this.sharing = true;
+    try {
+      if (publish && this.dirty) {
+        if (!await this.persistNote('已保存')) { return; }
+        if (this.dirty) { this.toast('笔记有新修改，请保存后再共享'); return; }
+      }
+      const updated: Note = JSON.parse(await Api.post(`/notes/${note.id}/${publish ? 'share' : 'unshare'}`)) as Note;
+      this.myNotes = this.myNotes.map((item: Note): Note => item.id === note.id ? updated : item);
+      if (!publish) { this.toast('已设为私有'); }
+      else if (updated.quality_status === 'accepted') {
+        this.toast(`已共享，质量评估通过（${(updated.quality_score ?? 0).toFixed(1)} 分），已入知识库`);
+      } else if (updated.quality_status === 'rejected') {
+        this.toast('已共享，质量评估未通过，未入知识库');
+      } else { this.toast('已共享，暂未入知识库'); }
+    } catch (e) {
+      this.toast(`共享操作失败：${(e as Error).message}`);
+    } finally { this.sharing = false; }
+  }
+
   private async saveNote(): Promise<void> {
+    if (this.sharing) { return; }
     await this.persistNote('已保存');
   }
 
   private async renameNote(): Promise<void> {
+    if (this.sharing) { return; }
     if (this.noteTitle.trim() === '') {
       this.toast('笔记标题不能为空');
       return;
@@ -221,6 +268,7 @@ export struct AiNotePage {
   }
 
   private async deleteCurrentNote(): Promise<void> {
+    if (this.saving || this.sharing) { return; }
     const n: Note | null = this.currentNote();
     if (n === null || !this.canEditCurrent()) {
       this.toast('当前笔记为只读');
@@ -234,7 +282,7 @@ export struct AiNotePage {
         { text: '删除', color: AppTheme.DANGER }
       ]
     });
-    if (result.index !== 1) {
+    if (result.index !== 1 || this.saving || this.sharing) {
       return;
     }
     try {
@@ -691,10 +739,29 @@ export struct AiNotePage {
   }
 
   @Builder
+  shareButton() {
+    Button(this.sharing ? '处理中…' : (this.currentNote()?.visibility === 'shared' ? '取消共享' : '共享'))
+      .stateStyles({
+        normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
+        pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
+          .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
+        disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
+      })
+      .fontSize(AppTheme.FONT_BODY).height(40)
+      .enabled(this.canEditCurrent() && !this.saving && !this.sharing)
+      .backgroundColor(this.compact ? AppTheme.PRIMARY_LIGHT :
+        (this.currentNote()?.visibility === 'shared' ? 'rgba(255,255,255,0.76)' : AppTheme.SUCCESS))
+      .fontColor(this.compact ? AppTheme.PRIMARY_DEEP :
+        (this.currentNote()?.visibility === 'shared' ? AppTheme.TEXT_SECONDARY : '#FFFFFF'))
+      .borderRadius(this.compact ? 999 : AppTheme.RADIUS_BTN)
+      .onClick(() => { this.toggleShare(); })
+  }
+
+  @Builder
   editorView() {
     Column({ space: AppTheme.SPACE_M }) {
       if (this.compact) {
-        TextInput({ text: this.noteTitle, placeholder: '笔记标题' }).enabled(this.canEditCurrent())
+        TextInput({ text: this.noteTitle, placeholder: '笔记标题' }).enabled(this.canEditCurrent() && !this.sharing)
           .onChange((value: string) => { if (value !== this.noteTitle) { this.noteTitle = value; this.dirty = true; } })
         Row({ space: 8 }) {
           if (this.dirty) { Text('未保存').fontSize(12).fontColor(AppTheme.WARNING) }
@@ -712,6 +779,7 @@ export struct AiNotePage {
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
           }).fontColor(AppTheme.DANGER).backgroundColor(Color.Transparent).onClick(() => { this.deleteCurrentNote(); })
+            this.shareButton()
           }
         }.width('100%')
       } else {
@@ -721,7 +789,7 @@ export struct AiNotePage {
           .fontSize(AppTheme.FONT_SUBTITLE)
           .layoutWeight(1)
           .backgroundColor('transparent')
-          .enabled(this.canEditCurrent())
+          .enabled(this.canEditCurrent() && !this.sharing)
           .onChange((v: string) => {
             this.noteTitle = v;
             this.dirty = true;
@@ -768,6 +836,7 @@ export struct AiNotePage {
             .onClick(() => {
               this.deleteCurrentNote();
             })
+          this.shareButton()
         } else if (this.currentNote() !== null) {
           Text('只读')
             .fontSize(AppTheme.FONT_CAPTION)
@@ -781,7 +850,14 @@ export struct AiNotePage {
       .width('100%')
       }
 
-      if (this.selEnd > this.selStart && !this.readOnly) {
+      if (this.currentNote() !== null && this.canEditCurrent()) {
+        Row() {
+          MobileTabs({ labels: ['阅读', '编辑'], keys: ['preview', 'edit'], selected: this.noteBodyMode,
+            onSelect: (mode: string) => { this.setNoteBodyMode(mode); } })
+        }.width(this.compact ? '100%' : 220)
+      }
+
+      if (this.noteBodyMode === 'edit' && this.selEnd > this.selStart && !this.readOnly) {
         Flex({ wrap: FlexWrap.Wrap }) {
           Text('划词命令：').fontSize(AppTheme.FONT_CAPTION).fontColor(AppTheme.TEXT_TERTIARY)
           this.cmdButton('问 AI', 'ask')
@@ -814,6 +890,11 @@ export struct AiNotePage {
         .width('100%')
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
+      } else if (!this.canEditCurrent() || this.noteBodyMode === 'preview') {
+        Column() {
+          MarkdownView({ content: this.editorText.trim() === '' ? '暂无笔记正文' : this.editorText })
+        }.width('100%').layoutWeight(1).backgroundColor(AppTheme.BG_CARD)
+          .borderRadius(AppTheme.RADIUS_CARD).clip(true)
       } else {
         TextArea({ text: this.editorText, placeholder: '在此记录 Markdown 笔记，选中文本可唤起 AI 命令…' })
           .width('100%')
@@ -821,7 +902,7 @@ export struct AiNotePage {
           .fontSize(AppTheme.FONT_BODY)
           .backgroundColor(AppTheme.BG_CARD)
           .borderRadius(AppTheme.RADIUS_CARD)
-          .enabled(this.canEditCurrent())
+          .enabled(this.canEditCurrent() && !this.sharing)
           .onChange((v: string) => {
             this.editorText = v;
             this.dirty = true;
@@ -886,10 +967,10 @@ export struct AiNotePage {
         ForEach(this.messages, (m: UiChatMessage, index: number) => {
           ListItem() {
             Column({ space: AppTheme.SPACE_XS }) {
-              Text(m.role === 'user' ? '我' : 'AI')
+              Text(this.messages[index].role === 'user' ? '我' : 'AI')
                 .fontSize(AppTheme.FONT_CAPTION)
-                .fontColor(m.role === 'user' ? AppTheme.PRIMARY : AppTheme.SUCCESS)
-              if (m.warning !== '') {
+                .fontColor(this.messages[index].role === 'user' ? AppTheme.PRIMARY : AppTheme.SUCCESS)
+              if (this.messages[index].warning !== '') {
                 Row({ space: 8 }) {
                   Text('!')
                     .fontSize(12)
@@ -905,7 +986,7 @@ export struct AiNotePage {
                       .fontSize(AppTheme.FONT_CAPTION)
                       .fontWeight(FontWeight.Bold)
                       .fontColor('#8A5200')
-                    Text(m.warning)
+                    Text(this.messages[index].warning)
                       .fontSize(AppTheme.FONT_CAPTION)
                       .fontColor('#9A640F')
                       .lineHeight(18)
@@ -919,23 +1000,24 @@ export struct AiNotePage {
                 .backgroundColor('#FFF7E6')
                 .border({ width: 1, color: '#F3CF85' })
               }
-              Text(m.content + (m.streaming ? ' ▌' : ''))
-                .fontSize(AppTheme.FONT_BODY)
-                .fontColor(AppTheme.TEXT_PRIMARY)
-                .lineHeight(20)
-              if (m.sources.length > 0) {
-                Text(`来源：${m.sources.join('；')}`)
+              if (this.messages[index].role === 'user') {
+                Text(this.messages[index].content).fontSize(AppTheme.FONT_BODY).fontColor(AppTheme.TEXT_PRIMARY).lineHeight(20)
+              } else {
+                MarkdownView({ content: this.messages[index].content + (this.messages[index].streaming ? ' ▌' : ''), autoHeight: true })
+              }
+              if (this.messages[index].sources.length > 0) {
+                Text(`来源：${this.messages[index].sources.join('；')}`)
                   .fontSize(AppTheme.FONT_CAPTION)
                   .fontColor(AppTheme.TEXT_TERTIARY)
               }
-              if (m.role === 'assistant' && !m.streaming && m.content !== '') {
+              if (this.messages[index].role === 'assistant' && !this.messages[index].streaming && this.messages[index].content !== '') {
                 Row({ space: AppTheme.SPACE_S }) {
                   if (this.canEditCurrent()) {
                     Text('插入光标处')
                       .fontSize(AppTheme.FONT_CAPTION)
                       .fontColor(AppTheme.PRIMARY)
                       .onClick(() => {
-                        this.insertAt(this.selStart, `\n${m.content}\n`);
+                        this.insertAt(this.selStart, `\n${this.messages[index].content}\n`);
                         this.toast('已插入');
                       })
                     Text('替换选区')
@@ -943,7 +1025,7 @@ export struct AiNotePage {
                       .fontColor(AppTheme.PRIMARY)
                       .onClick(() => {
                         if (this.selEnd > this.selStart) {
-                          this.replaceRange(this.selStart, this.selEnd, m.content);
+                          this.replaceRange(this.selStart, this.selEnd, this.messages[index].content);
                           this.toast('已替换');
                         } else {
                           this.toast('请先在编辑器中选中要替换的文本');
@@ -954,7 +1036,7 @@ export struct AiNotePage {
                     .fontSize(AppTheme.FONT_CAPTION)
                     .fontColor(AppTheme.TEXT_SECONDARY)
                     .onClick(() => {
-                      this.copyText(m.content);
+                      this.copyText(this.messages[index].content);
                     })
                 }
               }
@@ -963,9 +1045,9 @@ export struct AiNotePage {
             .alignItems(HorizontalAlign.Start)
             .padding(AppTheme.SPACE_S)
             .borderRadius(AppTheme.RADIUS_BTN)
-            .backgroundColor(m.role === 'user' ? AppTheme.PRIMARY_LIGHT : 'transparent')
+            .backgroundColor(this.messages[index].role === 'user' ? AppTheme.PRIMARY_LIGHT : 'transparent')
           }
-        }, (m: UiChatMessage, index: number) => `${index}_${m.content.length}_${m.streaming}`)
+        }, (m: UiChatMessage, index: number) => `${index}_${m.role}`)
       }
       .layoutWeight(1)
       .width('100%')
@@ -1027,7 +1109,7 @@ export struct AiNotePage {
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
             disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
           }).layoutWeight(1).onClick(() => { this.compactTab = 'list'; })
-          Button('编辑').stateStyles({
+          Button('正文').stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
             pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
               .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },

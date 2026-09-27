@@ -16,7 +16,7 @@ export interface StreamCallbacks {
 
 /** 网络版固定连接智伴云服务；ohosTest 独立测试包使用隔离服务。 */
 export class Api {
-  static BASE_URL: string = 'http://zhiban.help:8000/api/v1';
+  static BASE_URL: string = 'http://47.114.55.34:8000/api/v1';
   private static readonly TIMEOUT_MS: number = 30000;
 
   static token: string = '';

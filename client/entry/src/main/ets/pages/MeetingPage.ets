@@ -1,4 +1,5 @@
 import { TouchMotion } from '../common/TouchMotion';
+import { MarkdownView } from '../common/components/MarkdownView';
 import { MotionPage } from '../common/components/MotionPage';
 import { LearningTheme as AppTheme } from '../common/LearningTheme';
 import { MobileLayout } from '../common/MobileLayout';
@@ -44,12 +45,14 @@ export struct MeetingPage {
   private timer: number = -1;
   private cursor: number = 0;
   private generation: number = 0;
+  private listGeneration: number = 0;
+  private refreshing: boolean = false;
   private polling: boolean = false;
   private active: boolean = true;
   private contextWarningShown: boolean = false;
   private courseId: number = GlobalState.courseId();
-  aboutToAppear(): void { this.active = true; this.loadRooms(); if (this.isAiMeeting()) { this.loadAgents(); } this.timer = setInterval(() => { this.poll(); }, 3000); }
-  aboutToDisappear(): void { this.active = false; this.generation++; clearInterval(this.timer); }
+  aboutToAppear(): void { this.active = true; this.loadRooms(); if (this.isAiMeeting()) { this.loadAgents(); } this.timer = setInterval(() => { this.refreshRooms(); }, 3000); }
+  aboutToDisappear(): void { this.active = false; this.generation++; this.listGeneration++; clearInterval(this.timer); }
 
   private async loadAgents(): Promise<void> {
     if (this.loadingAgents) { return; }
@@ -94,24 +97,53 @@ export struct MeetingPage {
   }
 
   private async loadRooms(): Promise<void> {
+    const request: number = ++this.listGeneration;
     try {
       const rooms = JSON.parse(await Api.get(
         `/meetings?class_course_id=${this.courseId}&room_type=${this.roomType}`)) as Room[];
-      if (this.active) { this.rooms = rooms; }
-    } catch (e) { this.error = (e as Error).message; }
+      if (!this.active || request !== this.listGeneration) { return; }
+      this.rooms = rooms.filter((item: Room) => item.joined === true && item.status !== 'ended');
+      if (this.room !== null && !this.rooms.some((item: Room) => item.id === this.room?.id)) {
+        this.removeRoomFromList(this.room.id);
+      }
+    } catch (e) { if (this.active && request === this.listGeneration) { this.error = (e as Error).message; } }
+  }
+
+  private async refreshRooms(): Promise<void> {
+    if (!this.active || this.refreshing || this.busy) { return; }
+    this.refreshing = true;
+    try { await this.loadRooms(); await this.poll(); }
+    finally { this.refreshing = false; }
+  }
+
+  private removeRoomFromList(id: number): void {
+    this.listGeneration++;
+    this.rooms = this.rooms.filter((item: Room) => item.id !== id);
+    if (this.room?.id !== id) { return; }
+    this.generation++;
+    this.room = null;
+    this.messages = [];
+    this.members = [];
+    this.people = [];
+    this.cursor = 0;
+    this.input = '';
+    this.settings = false;
+    this.minutes = false;
+    this.managingMembers = false;
+    this.contextWarningShown = false;
   }
 
   private async selectRoom(room: Room): Promise<void> {
-    if (this.busy) { return; }
+    if (this.busy || !room.joined || room.status === 'ended') { return; }
     this.busy = true;
     try {
-      await Api.post(`/meetings/${room.id}/join`);
       this.generation++;
       this.room = room;
       this.messages = [];
       this.cursor = 0;
       this.capacity = `${room.participant_limit}`;
       this.contextWarningShown = false;
+      this.minutes = false;
       this.settings = false;
       this.managingMembers = false;
       await this.poll();
@@ -126,6 +158,10 @@ export struct MeetingPage {
     try {
       const detail = JSON.parse(await Api.get(`/meetings/${this.room.id}?after=${this.cursor}`)) as Detail;
       if (!this.active || generation !== this.generation) { return; }
+      if (detail.room.status === 'ended' || !detail.members.some((member: Member) => member.id === GlobalState.userId())) {
+        this.removeRoomFromList(detail.room.id);
+        return;
+      }
       this.room = detail.room;
       this.members = detail.members;
       if (detail.context_limited && !this.contextWarningShown) {
@@ -145,10 +181,10 @@ export struct MeetingPage {
       this.cursor = detail.cursor;
       if (this.managingMembers) { await this.loadPeople(); }
     } catch (e) {
-      if (generation === this.generation) {
+      if (this.active && generation === this.generation) {
         this.error = (e as Error).message;
         if (this.error.includes('请先加入') || this.error.includes('尚未加入')) {
-          this.generation++; this.room = null; this.messages = []; this.managingMembers = false;
+          if (this.room !== null) { this.removeRoomFromList(this.room.id); }
           await this.loadRooms();
         }
       }
@@ -179,7 +215,8 @@ export struct MeetingPage {
           this.settings = false;
         } else {
           const result = JSON.parse(await Api.postLong(`/meetings/${id}/end`, {} as Record<string, string>)) as Room;
-          if (result.status !== 'ended') { this.error = '还有待处理消息，请稍后再次结束讨论'; }
+          if (result.status === 'ended') { this.removeRoomFromList(id); }
+          else { this.error = '还有待处理消息，请稍后再次结束讨论'; }
         }
         await this.poll();
       }
@@ -243,8 +280,7 @@ export struct MeetingPage {
       if (action === 'open') { await this.loadPeople(); this.managingMembers = true; }
       else if (action === 'leave') {
         await Api.post(`/meetings/${id}/leave`);
-        this.generation++; this.room = null; this.messages = []; this.people = [];
-        this.managingMembers = false;
+        this.removeRoomFromList(id);
         await this.loadRooms();
       } else {
         if (action === 'remove') { await Api.remove(`/meetings/${id}/members/${userId}`); }
@@ -329,7 +365,7 @@ export struct MeetingPage {
             Text(`${this.rooms.length} 个`).fontSize(12).fontColor(AppTheme.TEXT_SECONDARY)
           }.width('100%').padding({ top: 8, bottom: 4 })
           if (this.rooms.length === 0 && this.error === '') {
-            Text('还没有学习小组，可以创建一个开始讨论。').fontSize(13).lineHeight(21)
+            Text('暂无已加入且未结束的学习小组，可以创建一个开始讨论。').fontSize(13).lineHeight(21)
               .fontColor(AppTheme.TEXT_SECONDARY).width('100%').padding({ top: 8, bottom: 8 })
           }
         List({ space: 8 }) {
@@ -526,13 +562,17 @@ export struct MeetingPage {
                   }.width('100%').padding(8).backgroundColor('#FFFFFF').borderRadius(8)
                 }, (person: ManagedMember) => `${person.id}_${person.joined}_${person.removed}_${this.room?.creator_id}`)
               } else if (this.minutes && this.isAiMeeting()) {
-                Text(this.room.minutes || '暂无学习总结').width('100%').fontSize(14).copyOption(CopyOptions.InApp)
+                MarkdownView({ content: this.room.minutes || '暂无学习总结', autoHeight: true, textSize: 15 })
               } else {
                 ForEach(this.messages, (message: Message) => {
                   Column({ space: 6 }) {
                     Text(message.sender_name).fontSize(12).fontColor(AppTheme.PRIMARY_DEEP).width('100%')
-                    Text(message.content).fontSize(15).lineHeight(24).fontColor(AppTheme.TEXT_PRIMARY)
-                      .width('100%').copyOption(CopyOptions.InApp)
+                    if (message.role === 'user') {
+                      Text(message.content).fontSize(15).lineHeight(24).fontColor(AppTheme.TEXT_PRIMARY)
+                        .width('100%').copyOption(CopyOptions.InApp)
+                    } else {
+                      MarkdownView({ content: message.content, autoHeight: true, textSize: 15 })
+                    }
                   }.width('100%').padding(14).backgroundColor(message.role === 'user' ? '#FFFFFF' : AppTheme.PRIMARY_LIGHT).borderRadius(8)
                 }, (message: Message) => `${message.id}`)
               }

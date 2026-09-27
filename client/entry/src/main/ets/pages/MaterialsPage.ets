@@ -76,7 +76,7 @@ export struct MaterialsPage {
       Search({ value: this.search, placeholder: '搜索资料或课次' }).width('100%').height(48)
         .backgroundColor(AppTheme.BG_CARD).fontColor(AppTheme.INK)
         .onChange((value: string) => { this.search = value; })
-      MobileTabs({ labels: ['全部', '提纲', '上传资料', '待审核'], keys: ['all', 'outline', 'resource', 'pending'],
+      MobileTabs({ labels: ['全部', '提纲', '已上传资料', '待审核'], keys: ['all', 'outline', 'resource', 'pending'],
         selected: this.filter, onSelect: (key: string) => { this.filter = key; } })
       if (this.loading) {
         LoadingProgress().width(32).height(32)

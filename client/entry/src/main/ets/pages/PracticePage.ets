@@ -1,4 +1,5 @@
 import { TouchMotion } from '../common/TouchMotion';
+import { MarkdownView } from '../common/components/MarkdownView';
 import { MotionPage } from '../common/components/MotionPage';
 import { promptAction } from '@kit.ArkUI';
 import { LearningTheme as AppTheme } from '../common/LearningTheme';
@@ -507,6 +508,8 @@ export struct PracticePage {
   @Builder
   leftPanel() {
     Column() {
+      Scroll() {
+      Column() {
       Column({ space: 5 }) {
         Text('刷题计划')
           .fontSize(24)
@@ -573,7 +576,8 @@ export struct PracticePage {
           this.requirementText = value;
         })
 
-      Blank()
+      }.width('100%')
+      }.width('100%').layoutWeight(1).align(Alignment.Top).scrollBar(BarState.Auto)
 
       Button(this.generating ? '正在生成…' : '✦  AI 出题').stateStyles({
             normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
@@ -584,8 +588,11 @@ export struct PracticePage {
         .fontSize(AppTheme.FONT_BODY)
         .fontWeight(FontWeight.Bold)
         .fontColor('#FFFFFF')
-        .width('100%')
+        .width('90%')
+        .constraintSize({ maxWidth: 280 })
         .height(46)
+        .flexShrink(0)
+        .margin({ top: 12, bottom: 4 })
         .borderRadius(23)
         .backgroundColor(this.generating ? AppTheme.TEXT_TERTIARY : AppTheme.PRIMARY)
         .enabled(!this.generating && !this.contextLoading && this.contextError === '' && this.knowledgeCount > 0)
@@ -616,12 +623,9 @@ export struct PracticePage {
         .borderRadius(16)
         .backgroundColor(this.currentSubmitted() && index === this.currentQuestion().answer ? AppTheme.SUCCESS :
           (index === this.currentSelectedAnswer() ? this.optionBorderColor(index) : '#EEF1F5'))
-      Text(option)
-        .fontSize(AppTheme.FONT_BODY)
-        .fontWeight(index === this.currentSelectedAnswer() ? FontWeight.Medium : FontWeight.Normal)
-        .fontColor(this.optionTextColor(index))
-        .layoutWeight(1)
-        .lineHeight(24)
+      Column() {
+        MarkdownView({ content: option, autoHeight: true, textColor: this.optionTextColor(index) })
+      }.layoutWeight(1).hitTestBehavior(HitTestMode.None)
     }
     .width('100%')
     .constraintSize({ minHeight: 64 })
@@ -654,11 +658,7 @@ export struct PracticePage {
           .fontSize(10)
           .fontColor(PRACTICE_VIOLET)
       }
-      Text(this.currentQuestion().explanation)
-        .fontSize(AppTheme.FONT_BODY)
-        .fontColor(AppTheme.TEXT_SECONDARY)
-        .lineHeight(23)
-        .width('100%')
+      MarkdownView({ content: this.currentQuestion().explanation, autoHeight: true, textColor: AppTheme.TEXT_SECONDARY })
     }
     .width('100%')
     .padding(18)
@@ -717,12 +717,8 @@ export struct PracticePage {
       }
       .width('100%')
 
-      Text(this.currentQuestion().stem)
-        .fontSize(MobileLayout.studentPhone() ? 18 : 21)
-        .fontWeight(FontWeight.Bold)
-        .fontColor(AppTheme.INK)
-        .lineHeight(31)
-        .width('100%')
+      MarkdownView({ content: this.currentQuestion().stem, autoHeight: true,
+        textSize: MobileLayout.studentPhone() ? 18 : 21, textColor: AppTheme.INK, bold: true })
         .margin({ top: 18, bottom: 22 })
 
       Column({ space: 10 }) {
@@ -975,7 +971,7 @@ export struct PracticePage {
           Row() {
             MotionPage({ navigationKey: `0|${this.compactTab}`, tabNavigation: true }) {
             if (this.compactTab === 'generate') {
-              Scroll() { this.leftPanel() }.width('100%').height('100%').align(Alignment.Top)
+              this.leftPanel()
             }
             else if (this.compactTab === 'difficulty') {
               Scroll() { this.rightPanel() }.width('100%').height('100%').align(Alignment.Top)

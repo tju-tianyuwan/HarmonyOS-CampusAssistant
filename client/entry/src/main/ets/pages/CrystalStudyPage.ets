@@ -1,6 +1,7 @@
 import { TouchMotion } from '../common/TouchMotion';
 import { StudyMaterial } from '../common/StudyMaterial';
 import { CrystalIcon } from '../common/components/CrystalIcon';
+import { CourseAiButton } from '../common/components/CourseAiButton';
 import { StudyBackdrop } from '../common/components/StudyBackdrop';
 import { GlobalState } from '../service/GlobalState';
 import { Api } from '../service/Api';
@@ -377,17 +378,7 @@ export struct CrystalStudyPage {
         .backgroundBlurStyle(this.subtle ? BlurStyle.NONE : BlurStyle.Thin)
         .border({ width: 1, color: '#EFFFFFFF' }).shadow({ radius: 18, color: '#1D32669D', offsetY: 6 })
       if (!GlobalState.isTeacher()) {
-      Button('AI').stateStyles({
-            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
-            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
-              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
-            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).fontSize(19).fontWeight(FontWeight.Bold).fontColor('#FFFFFF').width(56).height(56).borderRadius(22)
-        .backgroundColor('#124B87')
-        .linearGradient({ angle: 150, colors: [['#5B9CC9', 0], ['#2362A0', 0.55], ['#1A437C', 1]] })
-        .border({ width: 1.2, color: '#CCE9FA' }).shadow({ radius: 14, color: '#405780A9', offsetY: 6 })
-        .visualEffect(this.light(true)).accessibilityText('打开课程 AI 助手')
-        .onClick(() => { this.onNavigate('course_ai'); })
+        CourseAiButton({ onOpen: () => { this.onNavigate('course_ai'); } })
       }
     }.width('100%').constraintSize({ maxWidth: 560 }).padding({ left: 18,
       right: GlobalState.isTeacher() && this.compact ? 132 : 18, top: 10, bottom: 16 })

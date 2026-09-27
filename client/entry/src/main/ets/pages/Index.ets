@@ -1,6 +1,7 @@
 import { TouchMotion } from '../common/TouchMotion';
 import { MotionPage } from '../common/components/MotionPage';
 import { MobileTabs } from '../common/components/MobileTabs';
+import { CourseAiButton } from '../common/components/CourseAiButton';
 import { FloatingRecordButton } from '../common/components/FloatingRecordButton';
 import { AuthPage } from './AuthPage';
 import { CrystalStudyPage } from './CrystalStudyPage';
@@ -277,8 +278,8 @@ struct Index {
     } catch (e) { this.onAuthExpired(); }
   }
 
-  private shouldShowRecordEntry(): boolean {
-    return !GlobalState.isTeacher() && this.currentTab !== 'course_ai';
+  private shouldShowStudentAiEntry(): boolean {
+    return !GlobalState.isTeacher();
   }
 
   private hasTeacherRecordEntry(): boolean {
@@ -556,11 +557,23 @@ struct Index {
   @Builder
   workbenchSwitcher() {
     if (this.compactLayout) {
-      Column() { this.workbenchTabs() }.width('100%').margin({ top: 60, bottom: 8 })
+      Row({ space: 8 }) {
+        Column() { this.workbenchTabs() }.layoutWeight(1)
+        if (this.shouldShowStudentAiEntry()) {
+          CourseAiButton({ selected: this.currentTab === 'course_ai', interactive: !this.recordingActive,
+            onOpen: () => { this.openRecordPage(); } })
+        }
+      }.width('100%').padding({ left: 12, right: 12 }).margin({ top: 60, bottom: 8 })
     } else {
       Row() {
         Blank()
-        Column() { this.workbenchTabs() }.width(400)
+        Row({ space: 8 }) {
+          Column() { this.workbenchTabs() }.width(400)
+          if (this.shouldShowStudentAiEntry()) {
+            CourseAiButton({ selected: this.currentTab === 'course_ai', interactive: !this.recordingActive,
+              onOpen: () => { this.openRecordPage(); } })
+          }
+        }
         Blank()
       }.width('100%').height(78).padding({ top: AppTheme.SPACE_M }).zIndex(40)
     }
@@ -569,7 +582,8 @@ struct Index {
   @Builder
   workbenchTabs() {
     MobileTabs({
-      labels: GlobalState.isTeacher() ? ['课堂', 'AI数据', 'AI学习小组', '资料'] : ['课程', 'AI学习小组', '刷题', '笔记'],
+      labels: GlobalState.isTeacher() ? ['课堂', 'AI数据', 'AI学习小组', '资料'] :
+        (this.compactLayout ? ['课程', '小组', '刷题', '笔记'] : ['课程', 'AI学习小组', '刷题', '笔记']),
       keys: GlobalState.isTeacher() ? ['class', 'course_ai', 'ai_meeting', 'materials'] : ['class', 'ai_meeting', 'practice', 'notes'],
       selected: this.currentTab, interactive: !this.recordingActive, solid: true,
       disabledKeys: GlobalState.canManageCurrentCourse() ? [] : ['materials'],
@@ -711,21 +725,6 @@ struct Index {
         }
         }.layoutWeight(1)
         .width('100%')
-        if (this.compactLayout && this.shouldShowRecordEntry()) {
-          Row() {
-            Text(GlobalState.course?.name ?? '').fontSize(12).fontColor(AppTheme.TEXT_SECONDARY)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1)
-            Button('AI').stateStyles({
-            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
-            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
-              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
-            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).width(64).height(40).fontSize(16).fontWeight(FontWeight.Bold).borderRadius(AppTheme.RADIUS_BTN)
-              .padding(0)
-              .fontColor('#FFFFFF').backgroundColor(AppTheme.PRIMARY)
-              .accessibilityText('课程 AI 助手').onClick(() => { this.openRecordPage(); })
-          }.width('100%').height(52).padding({ left: 16, right: 12 }).backgroundColor('#FFFFFF')
-        }
       }
       .width('100%')
       .height('100%')
@@ -733,19 +732,6 @@ struct Index {
 
       this.workspaceTopControls()
 
-      if (this.shouldShowRecordEntry() && !this.compactLayout) {
-          Button('AI 助手').stateStyles({
-            normal: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation(TouchMotion.release(this.reduceMotion)) },
-            pressed: { .scale(TouchMotion.pressedScale(this.reduceMotion, 'button'))
-              .translate(TouchMotion.pressedOffset(this.reduceMotion, 'button')).animation(TouchMotion.press(this.reduceMotion)) },
-            disabled: { .scale({ x: 1, y: 1 }).translate({ y: 0 }).animation({ duration: 0 }) }
-          }).fontSize(16).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
-            .height(48).padding({ left: 22, right: 22 }).borderRadius(16)
-            .backgroundColor(AppTheme.PRIMARY).margin({ right: 24, bottom: 24 })
-            .shadow({ radius: 12, color: 'rgba(21,90,165,0.16)', offsetY: 4 })
-            .accessibilityText('课程 AI 助手')
-            .onClick(() => { this.openRecordPage(); })
-      }
     }
     .width('100%')
     .height('100%')
