@@ -43,9 +43,6 @@ dist/
 *.rar
 *.7z
 *.tar.gz
-competition-unified/.hap-inspect-*/
-competition-unified/layout-*.json
-competition-unified/zhiban-*.png
 
 # Native build outputs
 *.pyd
